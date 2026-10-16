@@ -1,0 +1,3 @@
+[console_scripts]
+helloworld = pkg_1016.node_helloworld:main
+

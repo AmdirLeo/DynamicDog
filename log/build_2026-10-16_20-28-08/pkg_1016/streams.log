@@ -1,0 +1,39 @@
+[4.070s] Invoking command in '/home/mi/A_ws/src/pkg_1016': PYTHONPATH=/home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages:${PYTHONPATH} /usr/bin/python3 setup.py egg_info --egg-base ../../build/pkg_1016 build --build-base /home/mi/A_ws/build/pkg_1016/build install --prefix /home/mi/A_ws/install/pkg_1016 --record /home/mi/A_ws/build/pkg_1016/install.log --single-version-externally-managed
+[5.577s] running egg_info
+[5.581s] creating ../../build/pkg_1016/pkg_1016.egg-info
+[5.585s] writing ../../build/pkg_1016/pkg_1016.egg-info/PKG-INFO
+[5.585s] writing dependency_links to ../../build/pkg_1016/pkg_1016.egg-info/dependency_links.txt
+[5.586s] writing entry points to ../../build/pkg_1016/pkg_1016.egg-info/entry_points.txt
+[5.586s] writing requirements to ../../build/pkg_1016/pkg_1016.egg-info/requires.txt
+[5.587s] writing top-level names to ../../build/pkg_1016/pkg_1016.egg-info/top_level.txt
+[5.600s] writing manifest file '../../build/pkg_1016/pkg_1016.egg-info/SOURCES.txt'
+[5.609s] reading manifest file '../../build/pkg_1016/pkg_1016.egg-info/SOURCES.txt'
+[5.616s] writing manifest file '../../build/pkg_1016/pkg_1016.egg-info/SOURCES.txt'
+[5.618s] running build
+[5.619s] running build_py
+[5.621s] creating /home/mi/A_ws/build/pkg_1016/build
+[5.622s] creating /home/mi/A_ws/build/pkg_1016/build/lib
+[5.624s] creating /home/mi/A_ws/build/pkg_1016/build/lib/pkg_1016
+[5.625s] copying pkg_1016/node_helloworld.py -> /home/mi/A_ws/build/pkg_1016/build/lib/pkg_1016
+[5.627s] copying pkg_1016/__init__.py -> /home/mi/A_ws/build/pkg_1016/build/lib/pkg_1016
+[5.628s] running install
+[5.629s] /usr/local/lib/python3.6/dist-packages/setuptools/command/install.py:37: SetuptoolsDeprecationWarning: setup.py install is deprecated. Use build and pip and other standards-based tools.
+[5.631s]   setuptools.SetuptoolsDeprecationWarning,
+[5.632s] running install_lib
+[5.634s] creating /home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages/pkg_1016
+[5.635s] copying /home/mi/A_ws/build/pkg_1016/build/lib/pkg_1016/node_helloworld.py -> /home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages/pkg_1016
+[5.637s] copying /home/mi/A_ws/build/pkg_1016/build/lib/pkg_1016/__init__.py -> /home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages/pkg_1016
+[5.638s] byte-compiling /home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages/pkg_1016/node_helloworld.py to node_helloworld.cpython-36.pyc
+[5.639s] byte-compiling /home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages/pkg_1016/__init__.py to __init__.cpython-36.pyc
+[5.641s] running install_data
+[5.642s] creating /home/mi/A_ws/install/pkg_1016/share/ament_index
+[5.644s] creating /home/mi/A_ws/install/pkg_1016/share/ament_index/resource_index
+[5.645s] creating /home/mi/A_ws/install/pkg_1016/share/ament_index/resource_index/packages
+[5.646s] copying resource/pkg_1016 -> /home/mi/A_ws/install/pkg_1016/share/ament_index/resource_index/packages
+[5.646s] copying package.xml -> /home/mi/A_ws/install/pkg_1016/share/pkg_1016
+[5.647s] running install_egg_info
+[5.650s] Copying ../../build/pkg_1016/pkg_1016.egg-info to /home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages/pkg_1016-0.0.0-py3.6.egg-info
+[5.654s] running install_scripts
+[5.746s] Installing helloworld script to /home/mi/A_ws/install/pkg_1016/lib/pkg_1016
+[5.747s] writing list of installed files to '/home/mi/A_ws/build/pkg_1016/install.log'
+[5.864s] Invoked command in '/home/mi/A_ws/src/pkg_1016' returned '0': PYTHONPATH=/home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages:${PYTHONPATH} /usr/bin/python3 setup.py egg_info --egg-base ../../build/pkg_1016 build --build-base /home/mi/A_ws/build/pkg_1016/build install --prefix /home/mi/A_ws/install/pkg_1016 --record /home/mi/A_ws/build/pkg_1016/install.log --single-version-externally-managed

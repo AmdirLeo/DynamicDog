@@ -1,0 +1,16 @@
+package.xml
+setup.cfg
+setup.py
+../../build/pkg_1016/pkg_1016.egg-info/PKG-INFO
+../../build/pkg_1016/pkg_1016.egg-info/SOURCES.txt
+../../build/pkg_1016/pkg_1016.egg-info/dependency_links.txt
+../../build/pkg_1016/pkg_1016.egg-info/entry_points.txt
+../../build/pkg_1016/pkg_1016.egg-info/requires.txt
+../../build/pkg_1016/pkg_1016.egg-info/top_level.txt
+../../build/pkg_1016/pkg_1016.egg-info/zip-safe
+pkg_1016/__init__.py
+pkg_1016/node_helloworld.py
+resource/pkg_1016
+test/test_copyright.py
+test/test_flake8.py
+test/test_pep257.py
