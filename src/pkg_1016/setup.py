@@ -21,6 +21,7 @@ setup(
     entry_points={
         'console_scripts': [
             'helloworld=pkg_1016.node_helloworld:main'
+            'move_the_dog=pkg_1016.move:main'
         ],
     },
 )
