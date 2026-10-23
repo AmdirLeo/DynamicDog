@@ -1,0 +1,88 @@
+[0.000000] (-) TimerEvent: {}
+[0.000811] (pkg_1016) JobQueued: {'identifier': 'pkg_1016', 'dependencies': OrderedDict()}
+[0.003065] (pkg_1016) JobStarted: {'identifier': 'pkg_1016'}
+[0.101481] (-) TimerEvent: {}
+[0.204657] (-) TimerEvent: {}
+[0.306458] (-) TimerEvent: {}
+[0.407297] (-) TimerEvent: {}
+[0.508112] (-) TimerEvent: {}
+[0.609024] (-) TimerEvent: {}
+[0.709856] (-) TimerEvent: {}
+[0.810749] (-) TimerEvent: {}
+[0.911584] (-) TimerEvent: {}
+[1.012492] (-) TimerEvent: {}
+[1.113331] (-) TimerEvent: {}
+[1.214313] (-) TimerEvent: {}
+[1.315244] (-) TimerEvent: {}
+[1.416197] (-) TimerEvent: {}
+[1.517982] (-) TimerEvent: {}
+[1.618977] (-) TimerEvent: {}
+[1.719848] (-) TimerEvent: {}
+[1.820863] (-) TimerEvent: {}
+[1.922770] (-) TimerEvent: {}
+[2.024815] (-) TimerEvent: {}
+[2.125623] (-) TimerEvent: {}
+[2.226474] (-) TimerEvent: {}
+[2.327328] (-) TimerEvent: {}
+[2.428247] (-) TimerEvent: {}
+[2.529209] (-) TimerEvent: {}
+[2.630428] (-) TimerEvent: {}
+[2.731382] (-) TimerEvent: {}
+[2.832216] (-) TimerEvent: {}
+[2.933239] (-) TimerEvent: {}
+[3.034285] (-) TimerEvent: {}
+[3.135266] (-) TimerEvent: {}
+[3.236205] (-) TimerEvent: {}
+[3.337298] (-) TimerEvent: {}
+[3.438582] (-) TimerEvent: {}
+[3.539638] (-) TimerEvent: {}
+[3.640733] (-) TimerEvent: {}
+[3.741766] (-) TimerEvent: {}
+[3.842905] (-) TimerEvent: {}
+[3.943966] (-) TimerEvent: {}
+[3.962822] (pkg_1016) Command: {'cmd': ['/usr/bin/python3', 'setup.py', 'egg_info', '--egg-base', '../../build/pkg_1016', 'build', '--build-base', '/home/mi/A_ws/build/pkg_1016/build', 'install', '--prefix', '/home/mi/A_ws/install/pkg_1016', '--record', '/home/mi/A_ws/build/pkg_1016/install.log', '--single-version-externally-managed'], 'cwd': '/home/mi/A_ws/src/pkg_1016', 'env': {'LESSOPEN': '| /usr/bin/lesspipe %s', 'MAIL': '/var/mail/mi', 'USER': 'mi', 'SSH_CLIENT': '10.0.0.169 61825 22', 'GIT_ASKPASS': '/home/mi/.vscode-server/cli/servers/Stable-ddc367ed5c8936efe395cffeec279b04ffd7db78/server/extensions/git/dist/askpass.sh', 'LD_LIBRARY_PATH': '/usr/lib/aarch64-linux-gnu/gazebo-11/plugins:/opt/ros2/galactic/opt/yaml_cpp_vendor/lib:/opt/ros2/galactic/opt/rviz_ogre_vendor/lib:/opt/ros2/galactic/lib:/opt/ros2/cyberdog/lib', 'BROWSER': '/home/mi/.vscode-server/cli/servers/Stable-ddc367ed5c8936efe395cffeec279b04ffd7db78/server/bin/helpers/browser.sh', 'SHLVL': '3', 'OLDPWD': '/home/mi/A_ws/src', 'CYCLONEDDS_URI': 'file:///etc/mi/cyclonedds.xml', 'HOME': '/home/mi', 'TERM_PROGRAM_VERSION': '1.98.2', 'VSCODE_IPC_HOOK_CLI': '/run/user/1000/vscode-ipc-b23d5dc7-6832-4fa9-aec8-13c8d5718fc4.sock', 'VSCODE_GIT_ASKPASS_MAIN': '/home/mi/.vscode-server/cli/servers/Stable-ddc367ed5c8936efe395cffeec279b04ffd7db78/server/extensions/git/dist/askpass-main.js', 'ROS_PYTHON_VERSION': '3', 'VSCODE_GIT_ASKPASS_NODE': '/home/mi/.vscode-server/cli/servers/Stable-ddc367ed5c8936efe395cffeec279b04ffd7db78/server/node', 'SSL_CERT_FILE': '/usr/lib/ssl/certs/ca-certificates.crt', 'DBUS_SESSION_BUS_ADDRESS': 'unix:path=/run/user/1000/bus', 'COLORTERM': 'truecolor', 'COLCON_PREFIX_PATH': '/home/mi/A_ws/install:/opt/ros2/cyberdog:/opt/ros2/galactic', 'ROS_DISTRO': 'galactic', 'LOGNAME': 'mi', '_': '/usr/bin/colcon', 'ROS_VERSION': '2', 'CLAUDE_CODE_SSE_PORT': '49544', 'PKG_CONFIG_PATH': '/opt/ros2/galactic/lib/aarch64-linux-gnu/pkgconfig:/opt/ros2/galactic/lib/pkgconfig', 'XDG_SESSION_ID': '4', 'TERM': 'xterm-256color', 'ROS_LOCALHOST_ONLY': '0', 'PATH': '/home/mi/.vscode-server/cli/servers/Stable-ddc367ed5c8936efe395cffeec279b04ffd7db78/server/bin/remote-cli:/opt/ros2/galactic/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin', 'XDG_RUNTIME_DIR': '/run/user/1000', 'SSL_CERT_DIR': '/usr/lib/ssl/certs', 'LANG': 'en_US.UTF-8', 'RMW_IMPLEMENTATION': 'rmw_cyclonedds_cpp', 'LS_COLORS': 'rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=30;41:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:*.tgz=01;31:*.arc=01;31:*.arj=01;31:*.taz=01;31:*.lha=01;31:*.lz4=01;31:*.lzh=01;31:*.lzma=01;31:*.tlz=01;31:*.txz=01;31:*.tzo=01;31:*.t7z=01;31:*.zip=01;31:*.z=01;31:*.Z=01;31:*.dz=01;31:*.gz=01;31:*.lrz=01;31:*.lz=01;31:*.lzo=01;31:*.xz=01;31:*.zst=01;31:*.tzst=01;31:*.bz2=01;31:*.bz=01;31:*.tbz=01;31:*.tbz2=01;31:*.tz=01;31:*.deb=01;31:*.rpm=01;31:*.jar=01;31:*.war=01;31:*.ear=01;31:*.sar=01;31:*.rar=01;31:*.alz=01;31:*.ace=01;31:*.zoo=01;31:*.cpio=01;31:*.7z=01;31:*.rz=01;31:*.cab=01;31:*.wim=01;31:*.swm=01;31:*.dwm=01;31:*.esd=01;31:*.jpg=01;35:*.jpeg=01;35:*.mjpg=01;35:*.mjpeg=01;35:*.gif=01;35:*.bmp=01;35:*.pbm=01;35:*.pgm=01;35:*.ppm=01;35:*.tga=01;35:*.xbm=01;35:*.xpm=01;35:*.tif=01;35:*.tiff=01;35:*.png=01;35:*.svg=01;35:*.svgz=01;35:*.mng=01;35:*.pcx=01;35:*.mov=01;35:*.mpg=01;35:*.mpeg=01;35:*.m2v=01;35:*.mkv=01;35:*.webm=01;35:*.ogm=01;35:*.mp4=01;35:*.m4v=01;35:*.mp4v=01;35:*.vob=01;35:*.qt=01;35:*.nuv=01;35:*.wmv=01;35:*.asf=01;35:*.rm=01;35:*.rmvb=01;35:*.flc=01;35:*.avi=01;35:*.fli=01;35:*.flv=01;35:*.gl=01;35:*.dl=01;35:*.xcf=01;35:*.xwd=01;35:*.yuv=01;35:*.cgm=01;35:*.emf=01;35:*.ogv=01;35:*.ogx=01;35:*.aac=00;36:*.au=00;36:*.flac=00;36:*.m4a=00;36:*.mid=00;36:*.midi=00;36:*.mka=00;36:*.mp3=00;36:*.mpc=00;36:*.ogg=00;36:*.ra=00;36:*.wav=00;36:*.oga=00;36:*.opus=00;36:*.spx=00;36:*.xspf=00;36:', 'TERM_PROGRAM': 'vscode', 'VSCODE_GIT_IPC_HANDLE': '/run/user/1000/vscode-git-91879dcc66.sock', 'AMENT_PREFIX_PATH': '/home/mi/A_ws/install/pkg_1016:/opt/ros2/cyberdog:/opt/ros2/galactic', 'ROS_DOMAIN_ID': '42', 'SHELL': '/bin/bash', 'LESSCLOSE': '/usr/bin/lesspipe %s %s', 'VSCODE_GIT_ASKPASS_EXTRA_ARGS': '', 'PWD': '/home/mi/A_ws/build/pkg_1016', 'SSH_CONNECTION': '10.0.0.169 61825 10.0.0.12 22', 'XDG_DATA_DIRS': '/usr/local/share:/usr/share:/var/lib/snapd/desktop', 'PYTHONPATH': '/home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages:/home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages:/opt/ros2/cyberdog/lib/python3.6/site-packages:/opt/ros2/galactic/lib/python3.6/site-packages', 'COLCON': '1', 'CMAKE_PREFIX_PATH': '/opt/ros2/cyberdog:/opt/ros2/galactic'}, 'shell': False}
+[4.044289] (-) TimerEvent: {}
+[4.146286] (-) TimerEvent: {}
+[4.247511] (-) TimerEvent: {}
+[4.348730] (-) TimerEvent: {}
+[4.449995] (-) TimerEvent: {}
+[4.551205] (-) TimerEvent: {}
+[4.652489] (-) TimerEvent: {}
+[4.753677] (-) TimerEvent: {}
+[4.854829] (-) TimerEvent: {}
+[4.955959] (-) TimerEvent: {}
+[5.057285] (-) TimerEvent: {}
+[5.158468] (-) TimerEvent: {}
+[5.259739] (-) TimerEvent: {}
+[5.361035] (-) TimerEvent: {}
+[5.462234] (-) TimerEvent: {}
+[5.501425] (pkg_1016) StdoutLine: {'line': b'running egg_info\n'}
+[5.504709] (pkg_1016) StdoutLine: {'line': b'writing ../../build/pkg_1016/pkg_1016.egg-info/PKG-INFO\n'}
+[5.506219] (pkg_1016) StdoutLine: {'line': b'writing dependency_links to ../../build/pkg_1016/pkg_1016.egg-info/dependency_links.txt\n'}
+[5.507077] (pkg_1016) StdoutLine: {'line': b'writing entry points to ../../build/pkg_1016/pkg_1016.egg-info/entry_points.txt\n'}
+[5.507888] (pkg_1016) StdoutLine: {'line': b'writing requirements to ../../build/pkg_1016/pkg_1016.egg-info/requires.txt\n'}
+[5.508395] (pkg_1016) StdoutLine: {'line': b'writing top-level names to ../../build/pkg_1016/pkg_1016.egg-info/top_level.txt\n'}
+[5.523249] (pkg_1016) StdoutLine: {'line': b"reading manifest file '../../build/pkg_1016/pkg_1016.egg-info/SOURCES.txt'\n"}
+[5.530044] (pkg_1016) StdoutLine: {'line': b"writing manifest file '../../build/pkg_1016/pkg_1016.egg-info/SOURCES.txt'\n"}
+[5.531026] (pkg_1016) StdoutLine: {'line': b'running build\n'}
+[5.531567] (pkg_1016) StdoutLine: {'line': b'running build_py\n'}
+[5.532433] (pkg_1016) StdoutLine: {'line': b'copying pkg_1016/move.py -> /home/mi/A_ws/build/pkg_1016/build/lib/pkg_1016\n'}
+[5.533165] (pkg_1016) StdoutLine: {'line': b'running install\n'}
+[5.534049] (pkg_1016) StderrLine: {'line': b'/usr/local/lib/python3.6/dist-packages/setuptools/command/install.py:37: SetuptoolsDeprecationWarning: setup.py install is deprecated. Use build and pip and other standards-based tools.\n'}
+[5.534707] (pkg_1016) StderrLine: {'line': b'  setuptools.SetuptoolsDeprecationWarning,\n'}
+[5.535864] (pkg_1016) StdoutLine: {'line': b'running install_lib\n'}
+[5.539223] (pkg_1016) StdoutLine: {'line': b'copying /home/mi/A_ws/build/pkg_1016/build/lib/pkg_1016/move.py -> /home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages/pkg_1016\n'}
+[5.541013] (pkg_1016) StdoutLine: {'line': b'byte-compiling /home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages/pkg_1016/move.py to move.cpython-36.pyc\n'}
+[5.543220] (pkg_1016) StdoutLine: {'line': b'running install_data\n'}
+[5.546064] (pkg_1016) StdoutLine: {'line': b'running install_egg_info\n'}
+[5.552936] (pkg_1016) StdoutLine: {'line': b"removing '/home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages/pkg_1016-0.0.0-py3.6.egg-info' (and everything under it)\n"}
+[5.554438] (pkg_1016) StdoutLine: {'line': b'Copying ../../build/pkg_1016/pkg_1016.egg-info to /home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages/pkg_1016-0.0.0-py3.6.egg-info\n'}
+[5.558744] (pkg_1016) StdoutLine: {'line': b'running install_scripts\n'}
+[5.562390] (-) TimerEvent: {}
+[5.643448] (pkg_1016) StdoutLine: {'line': b'Installing helloworld=pkg_1016.node_helloworld:mainmove_the_dog script to /home/mi/A_ws/install/pkg_1016/lib/pkg_1016\n'}
+[5.645135] (pkg_1016) StdoutLine: {'line': b"writing list of installed files to '/home/mi/A_ws/build/pkg_1016/install.log'\n"}
+[5.662743] (-) TimerEvent: {}
+[5.755606] (pkg_1016) CommandEnded: {'returncode': 0}
+[5.763487] (-) TimerEvent: {}
+[5.843523] (pkg_1016) JobEnded: {'identifier': 'pkg_1016', 'rc': 0}
+[5.848795] (-) EventReactorShutdown: {}

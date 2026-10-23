@@ -5,7 +5,7 @@ from protocol.msg import MotionServoCmd   # Motion command message type
 class BasicMove(Node):
     def __init__(self, name):
         super().__init__(name)
-        self.dog_name = "N40"
+        self.dog_name = "mi_desktop_48_b0_2d_7b_03_fd"
         # Create publisher for motion commands
         self.pub = self.create_publisher(MotionServoCmd, f'/{self.dog_name}/motion_servo_cmd', 10)
         # Create timer to call timer_callback every 0.1s (10Hz)

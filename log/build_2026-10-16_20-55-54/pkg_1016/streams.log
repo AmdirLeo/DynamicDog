@@ -1,0 +1,26 @@
+[3.978s] Invoking command in '/home/mi/A_ws/src/pkg_1016': PYTHONPATH=/home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages:${PYTHONPATH} /usr/bin/python3 setup.py egg_info --egg-base ../../build/pkg_1016 build --build-base /home/mi/A_ws/build/pkg_1016/build install --prefix /home/mi/A_ws/install/pkg_1016 --record /home/mi/A_ws/build/pkg_1016/install.log --single-version-externally-managed
+[5.499s] running egg_info
+[5.501s] writing ../../build/pkg_1016/pkg_1016.egg-info/PKG-INFO
+[5.503s] writing dependency_links to ../../build/pkg_1016/pkg_1016.egg-info/dependency_links.txt
+[5.504s] writing entry points to ../../build/pkg_1016/pkg_1016.egg-info/entry_points.txt
+[5.504s] writing requirements to ../../build/pkg_1016/pkg_1016.egg-info/requires.txt
+[5.505s] writing top-level names to ../../build/pkg_1016/pkg_1016.egg-info/top_level.txt
+[5.520s] reading manifest file '../../build/pkg_1016/pkg_1016.egg-info/SOURCES.txt'
+[5.527s] writing manifest file '../../build/pkg_1016/pkg_1016.egg-info/SOURCES.txt'
+[5.528s] running build
+[5.528s] running build_py
+[5.529s] copying pkg_1016/move.py -> /home/mi/A_ws/build/pkg_1016/build/lib/pkg_1016
+[5.530s] running install
+[5.531s] /usr/local/lib/python3.6/dist-packages/setuptools/command/install.py:37: SetuptoolsDeprecationWarning: setup.py install is deprecated. Use build and pip and other standards-based tools.
+[5.531s]   setuptools.SetuptoolsDeprecationWarning,
+[5.532s] running install_lib
+[5.536s] copying /home/mi/A_ws/build/pkg_1016/build/lib/pkg_1016/move.py -> /home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages/pkg_1016
+[5.538s] byte-compiling /home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages/pkg_1016/move.py to move.cpython-36.pyc
+[5.540s] running install_data
+[5.543s] running install_egg_info
+[5.550s] removing '/home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages/pkg_1016-0.0.0-py3.6.egg-info' (and everything under it)
+[5.551s] Copying ../../build/pkg_1016/pkg_1016.egg-info to /home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages/pkg_1016-0.0.0-py3.6.egg-info
+[5.555s] running install_scripts
+[5.640s] Installing helloworld=pkg_1016.node_helloworld:mainmove_the_dog script to /home/mi/A_ws/install/pkg_1016/lib/pkg_1016
+[5.642s] writing list of installed files to '/home/mi/A_ws/build/pkg_1016/install.log'
+[5.753s] Invoked command in '/home/mi/A_ws/src/pkg_1016' returned '0': PYTHONPATH=/home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages:${PYTHONPATH} /usr/bin/python3 setup.py egg_info --egg-base ../../build/pkg_1016 build --build-base /home/mi/A_ws/build/pkg_1016/build install --prefix /home/mi/A_ws/install/pkg_1016 --record /home/mi/A_ws/build/pkg_1016/install.log --single-version-externally-managed

@@ -9,6 +9,7 @@ setup.py
 ../../build/pkg_1016/pkg_1016.egg-info/top_level.txt
 ../../build/pkg_1016/pkg_1016.egg-info/zip-safe
 pkg_1016/__init__.py
+pkg_1016/move.py
 pkg_1016/node_helloworld.py
 resource/pkg_1016
 test/test_copyright.py

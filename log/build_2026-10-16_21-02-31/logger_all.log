@@ -1,0 +1,130 @@
+[1.702s] DEBUG:colcon:Command line arguments: ['/usr/bin/colcon', 'build', '--packages-select', 'pkg_1016']
+[1.703s] DEBUG:colcon:Parsed command line arguments: Namespace(allow_overriding=[], ament_cmake_args=None, base_paths=['.'], build_base='build', catkin_cmake_args=None, catkin_skip_building_tests=False, cmake_args=None, cmake_clean_cache=False, cmake_clean_first=False, cmake_force_configure=False, cmake_target=None, cmake_target_skip_unavailable=False, continue_on_error=False, event_handlers=None, executor='parallel', ignore_user_meta=False, install_base='install', log_base=None, log_level=None, main=<bound method BuildVerb.main of <colcon_core.verb.build.BuildVerb object at 0x7fa9806e10>>, merge_install=False, metas=['./colcon.meta'], packages_above=None, packages_above_and_dependencies=None, packages_above_depth=None, packages_end=None, packages_ignore=None, packages_ignore_regex=None, packages_select=['pkg_1016'], packages_select_build_failed=False, packages_select_by_dep=None, packages_select_regex=None, packages_select_test_failures=False, packages_skip=None, packages_skip_build_finished=False, packages_skip_by_dep=None, packages_skip_regex=None, packages_skip_test_passed=False, packages_skip_up_to=None, packages_start=None, packages_up_to=None, packages_up_to_regex=None, parallel_workers=6, paths=None, symlink_install=False, test_result_base=None, verb_extension=<colcon_core.verb.build.BuildVerb object at 0x7fa9806e10>, verb_name='build', verb_parser=<colcon_defaults.argument_parser.defaults.DefaultArgumentsDecorator object at 0x7fa977b400>)
+[1.730s] Level 1:colcon.colcon_core.package_discovery:discover_packages(colcon_meta) check parameters
+[1.731s] Level 1:colcon.colcon_core.package_discovery:discover_packages(recursive) check parameters
+[1.731s] Level 1:colcon.colcon_core.package_discovery:discover_packages(ignore) check parameters
+[1.731s] Level 1:colcon.colcon_core.package_discovery:discover_packages(path) check parameters
+[1.731s] Level 1:colcon.colcon_core.package_discovery:discover_packages(colcon_meta) discover
+[1.733s] Level 1:colcon.colcon_core.package_discovery:discover_packages(recursive) discover
+[1.733s] INFO:colcon.colcon_core.package_discovery:Crawling recursively for packages in '/home/mi/A_ws'
+[1.734s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extensions ['ignore', 'ignore_ament_install']
+[1.735s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extension 'ignore'
+[1.735s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extension 'ignore_ament_install'
+[1.736s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extensions ['colcon_pkg']
+[1.736s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extension 'colcon_pkg'
+[1.736s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extensions ['colcon_meta']
+[1.736s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extension 'colcon_meta'
+[1.737s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extensions ['ros']
+[1.737s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extension 'ros'
+[2.138s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extensions ['cmake', 'python']
+[2.139s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extension 'cmake'
+[2.139s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extension 'python'
+[2.139s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extensions ['python_setup_py']
+[2.139s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extension 'python_setup_py'
+[2.140s] Level 1:colcon.colcon_core.package_identification:_identify(build) by extensions ['ignore', 'ignore_ament_install']
+[2.141s] Level 1:colcon.colcon_core.package_identification:_identify(build) by extension 'ignore'
+[2.141s] Level 1:colcon.colcon_core.package_identification:_identify(build) ignored
+[2.143s] Level 1:colcon.colcon_core.package_identification:_identify(install) by extensions ['ignore', 'ignore_ament_install']
+[2.143s] Level 1:colcon.colcon_core.package_identification:_identify(install) by extension 'ignore'
+[2.144s] Level 1:colcon.colcon_core.package_identification:_identify(install) ignored
+[2.144s] Level 1:colcon.colcon_core.package_identification:_identify(log) by extensions ['ignore', 'ignore_ament_install']
+[2.145s] Level 1:colcon.colcon_core.package_identification:_identify(log) by extension 'ignore'
+[2.145s] Level 1:colcon.colcon_core.package_identification:_identify(log) ignored
+[2.145s] Level 1:colcon.colcon_core.package_identification:_identify(src) by extensions ['ignore', 'ignore_ament_install']
+[2.146s] Level 1:colcon.colcon_core.package_identification:_identify(src) by extension 'ignore'
+[2.146s] Level 1:colcon.colcon_core.package_identification:_identify(src) by extension 'ignore_ament_install'
+[2.147s] Level 1:colcon.colcon_core.package_identification:_identify(src) by extensions ['colcon_pkg']
+[2.147s] Level 1:colcon.colcon_core.package_identification:_identify(src) by extension 'colcon_pkg'
+[2.147s] Level 1:colcon.colcon_core.package_identification:_identify(src) by extensions ['colcon_meta']
+[2.147s] Level 1:colcon.colcon_core.package_identification:_identify(src) by extension 'colcon_meta'
+[2.148s] Level 1:colcon.colcon_core.package_identification:_identify(src) by extensions ['ros']
+[2.148s] Level 1:colcon.colcon_core.package_identification:_identify(src) by extension 'ros'
+[2.148s] Level 1:colcon.colcon_core.package_identification:_identify(src) by extensions ['cmake', 'python']
+[2.148s] Level 1:colcon.colcon_core.package_identification:_identify(src) by extension 'cmake'
+[2.149s] Level 1:colcon.colcon_core.package_identification:_identify(src) by extension 'python'
+[2.149s] Level 1:colcon.colcon_core.package_identification:_identify(src) by extensions ['python_setup_py']
+[2.149s] Level 1:colcon.colcon_core.package_identification:_identify(src) by extension 'python_setup_py'
+[2.150s] Level 1:colcon.colcon_core.package_identification:_identify(src/pkg_1016) by extensions ['ignore', 'ignore_ament_install']
+[2.150s] Level 1:colcon.colcon_core.package_identification:_identify(src/pkg_1016) by extension 'ignore'
+[2.151s] Level 1:colcon.colcon_core.package_identification:_identify(src/pkg_1016) by extension 'ignore_ament_install'
+[2.151s] Level 1:colcon.colcon_core.package_identification:_identify(src/pkg_1016) by extensions ['colcon_pkg']
+[2.151s] Level 1:colcon.colcon_core.package_identification:_identify(src/pkg_1016) by extension 'colcon_pkg'
+[2.151s] Level 1:colcon.colcon_core.package_identification:_identify(src/pkg_1016) by extensions ['colcon_meta']
+[2.152s] Level 1:colcon.colcon_core.package_identification:_identify(src/pkg_1016) by extension 'colcon_meta'
+[2.152s] Level 1:colcon.colcon_core.package_identification:_identify(src/pkg_1016) by extensions ['ros']
+[2.152s] Level 1:colcon.colcon_core.package_identification:_identify(src/pkg_1016) by extension 'ros'
+[2.165s] DEBUG:colcon.colcon_core.package_identification:Package 'src/pkg_1016' with type 'ros.ament_python' and name 'pkg_1016'
+[2.167s] Level 1:colcon.colcon_core.package_discovery:discover_packages(recursive) using defaults
+[2.169s] Level 1:colcon.colcon_core.package_discovery:discover_packages(ignore) discover
+[2.169s] Level 1:colcon.colcon_core.package_discovery:discover_packages(ignore) using defaults
+[2.170s] Level 1:colcon.colcon_core.package_discovery:discover_packages(path) discover
+[2.170s] Level 1:colcon.colcon_core.package_discovery:discover_packages(path) using defaults
+[2.276s] Level 5:colcon.colcon_core.verb:set package 'pkg_1016' build argument 'cmake_args' from command line to 'None'
+[2.277s] Level 5:colcon.colcon_core.verb:set package 'pkg_1016' build argument 'cmake_target' from command line to 'None'
+[2.277s] Level 5:colcon.colcon_core.verb:set package 'pkg_1016' build argument 'cmake_target_skip_unavailable' from command line to 'False'
+[2.277s] Level 5:colcon.colcon_core.verb:set package 'pkg_1016' build argument 'cmake_clean_cache' from command line to 'False'
+[2.277s] Level 5:colcon.colcon_core.verb:set package 'pkg_1016' build argument 'cmake_clean_first' from command line to 'False'
+[2.277s] Level 5:colcon.colcon_core.verb:set package 'pkg_1016' build argument 'cmake_force_configure' from command line to 'False'
+[2.278s] Level 5:colcon.colcon_core.verb:set package 'pkg_1016' build argument 'ament_cmake_args' from command line to 'None'
+[2.278s] Level 5:colcon.colcon_core.verb:set package 'pkg_1016' build argument 'catkin_cmake_args' from command line to 'None'
+[2.278s] Level 5:colcon.colcon_core.verb:set package 'pkg_1016' build argument 'catkin_skip_building_tests' from command line to 'False'
+[2.278s] DEBUG:colcon.colcon_core.verb:Building package 'pkg_1016' with the following arguments: {'ament_cmake_args': None, 'build_base': '/home/mi/A_ws/build/pkg_1016', 'catkin_cmake_args': None, 'catkin_skip_building_tests': False, 'cmake_args': None, 'cmake_clean_cache': False, 'cmake_clean_first': False, 'cmake_force_configure': False, 'cmake_target': None, 'cmake_target_skip_unavailable': False, 'install_base': '/home/mi/A_ws/install/pkg_1016', 'merge_install': False, 'path': '/home/mi/A_ws/src/pkg_1016', 'symlink_install': False, 'test_result_base': None}
+[2.329s] WARNING:colcon.colcon_core.verb:Some selected packages are already built in one or more underlay workspaces:
+	'pkg_1016' is in: /home/mi/A_ws/install/pkg_1016
+If a package in a merged underlay workspace is overridden and it installs headers, then all packages in the overlay must sort their include directories by workspace order. Failure to do so may result in build failures or undefined behavior at run time.
+If the overridden package is used by another package in any underlay, then the overriding package in the overlay must be API and ABI compatible or undefined behavior at run time may occur.
+
+If you understand the risks and want to override a package anyways, add the following to the command line:
+	--allow-overriding pkg_1016
+
+This may be promoted to an error in a future release of colcon-core.
+[2.332s] INFO:colcon.colcon_core.executor:Executing jobs using 'parallel' executor
+[2.345s] DEBUG:colcon.colcon_parallel_executor.executor.parallel:run_until_complete
+[2.346s] INFO:colcon.colcon_ros.task.ament_python.build:Building ROS package in '/home/mi/A_ws/src/pkg_1016' with build type 'ament_python'
+[2.347s] Level 1:colcon.colcon_core.shell:create_environment_hook('pkg_1016', 'ament_prefix_path')
+[2.365s] INFO:colcon.colcon_core.plugin_system:Skipping extension 'colcon_core.shell.bat': Not used on non-Windows systems
+[2.366s] INFO:colcon.colcon_core.shell:Creating environment hook '/home/mi/A_ws/install/pkg_1016/share/pkg_1016/hook/ament_prefix_path.ps1'
+[2.370s] INFO:colcon.colcon_core.shell:Creating environment descriptor '/home/mi/A_ws/install/pkg_1016/share/pkg_1016/hook/ament_prefix_path.dsv'
+[2.372s] INFO:colcon.colcon_core.shell:Creating environment hook '/home/mi/A_ws/install/pkg_1016/share/pkg_1016/hook/ament_prefix_path.sh'
+[2.378s] INFO:colcon.colcon_core.shell:Skip shell extension 'powershell' for command environment: Not usable outside of PowerShell
+[2.379s] DEBUG:colcon.colcon_core.shell:Skip shell extension 'dsv' for command environment
+[4.153s] INFO:colcon.colcon_core.task.python.build:Building Python package in '/home/mi/A_ws/src/pkg_1016'
+[4.160s] INFO:colcon.colcon_core.shell:Skip shell extension 'powershell' for command environment: Not usable outside of PowerShell
+[4.160s] DEBUG:colcon.colcon_core.shell:Skip shell extension 'dsv' for command environment
+[6.337s] DEBUG:colcon.colcon_core.event_handler.log_command:Invoking command in '/home/mi/A_ws/src/pkg_1016': PYTHONPATH=/home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages:${PYTHONPATH} /usr/bin/python3 setup.py egg_info --egg-base ../../build/pkg_1016 build --build-base /home/mi/A_ws/build/pkg_1016/build install --prefix /home/mi/A_ws/install/pkg_1016 --record /home/mi/A_ws/build/pkg_1016/install.log --single-version-externally-managed
+[8.375s] DEBUG:colcon.colcon_core.event_handler.log_command:Invoked command in '/home/mi/A_ws/src/pkg_1016' returned '0': PYTHONPATH=/home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages:${PYTHONPATH} /usr/bin/python3 setup.py egg_info --egg-base ../../build/pkg_1016 build --build-base /home/mi/A_ws/build/pkg_1016/build install --prefix /home/mi/A_ws/install/pkg_1016 --record /home/mi/A_ws/build/pkg_1016/install.log --single-version-externally-managed
+[8.397s] Level 1:colcon.colcon_core.environment:checking '/home/mi/A_ws/install/pkg_1016' for CMake module files
+[8.400s] Level 1:colcon.colcon_core.environment:checking '/home/mi/A_ws/install/pkg_1016' for CMake config files
+[8.406s] Level 1:colcon.colcon_core.environment:checking '/home/mi/A_ws/install/pkg_1016/lib'
+[8.408s] Level 1:colcon.colcon_core.environment:checking '/home/mi/A_ws/install/pkg_1016/bin'
+[8.408s] Level 1:colcon.colcon_core.environment:checking '/home/mi/A_ws/install/pkg_1016/lib/pkgconfig/pkg_1016.pc'
+[8.409s] Level 1:colcon.colcon_core.environment:checking '/home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages'
+[8.409s] Level 1:colcon.colcon_core.shell:create_environment_hook('pkg_1016', 'pythonpath')
+[8.412s] INFO:colcon.colcon_core.shell:Creating environment hook '/home/mi/A_ws/install/pkg_1016/share/pkg_1016/hook/pythonpath.ps1'
+[8.415s] INFO:colcon.colcon_core.shell:Creating environment descriptor '/home/mi/A_ws/install/pkg_1016/share/pkg_1016/hook/pythonpath.dsv'
+[8.416s] INFO:colcon.colcon_core.shell:Creating environment hook '/home/mi/A_ws/install/pkg_1016/share/pkg_1016/hook/pythonpath.sh'
+[8.418s] Level 1:colcon.colcon_core.environment:create_environment_scripts_only(pkg_1016)
+[8.422s] INFO:colcon.colcon_core.shell:Creating package script '/home/mi/A_ws/install/pkg_1016/share/pkg_1016/package.ps1'
+[8.427s] INFO:colcon.colcon_core.shell:Creating package descriptor '/home/mi/A_ws/install/pkg_1016/share/pkg_1016/package.dsv'
+[8.430s] INFO:colcon.colcon_core.shell:Creating package script '/home/mi/A_ws/install/pkg_1016/share/pkg_1016/package.sh'
+[8.436s] INFO:colcon.colcon_core.shell:Creating package script '/home/mi/A_ws/install/pkg_1016/share/pkg_1016/package.bash'
+[8.440s] INFO:colcon.colcon_core.shell:Creating package script '/home/mi/A_ws/install/pkg_1016/share/pkg_1016/package.zsh'
+[8.445s] Level 1:colcon.colcon_core.environment:create_file_with_runtime_dependencies(/home/mi/A_ws/install/pkg_1016/share/colcon-core/packages/pkg_1016)
+[8.448s] DEBUG:colcon.colcon_parallel_executor.executor.parallel:closing loop
+[8.450s] DEBUG:colcon.colcon_parallel_executor.executor.parallel:loop closed
+[8.452s] DEBUG:colcon.colcon_parallel_executor.executor.parallel:run_until_complete finished with '0'
+[8.453s] DEBUG:colcon.colcon_core.event_reactor:joining thread
+[8.483s] INFO:colcon.colcon_core.plugin_system:Skipping extension 'colcon_notification.desktop_notification.terminal_notifier': Not used on non-Darwin systems
+[8.484s] INFO:colcon.colcon_core.plugin_system:Skipping extension 'colcon_notification.desktop_notification.win32': Not used on non-Windows systems
+[8.484s] INFO:colcon.colcon_notification.desktop_notification:Sending desktop notification using 'notify2'
+[8.542s] DEBUG:colcon.colcon_core.event_reactor:joined thread
+[8.546s] INFO:colcon.colcon_core.shell:Creating prefix script '/home/mi/A_ws/install/local_setup.ps1'
+[8.552s] INFO:colcon.colcon_core.shell:Creating prefix util module '/home/mi/A_ws/install/_local_setup_util_ps1.py'
+[8.562s] INFO:colcon.colcon_core.shell:Creating prefix chain script '/home/mi/A_ws/install/setup.ps1'
+[8.569s] INFO:colcon.colcon_core.shell:Creating prefix script '/home/mi/A_ws/install/local_setup.sh'
+[8.573s] INFO:colcon.colcon_core.shell:Creating prefix util module '/home/mi/A_ws/install/_local_setup_util_sh.py'
+[8.575s] INFO:colcon.colcon_core.shell:Creating prefix chain script '/home/mi/A_ws/install/setup.sh'
+[8.583s] INFO:colcon.colcon_core.shell:Creating prefix script '/home/mi/A_ws/install/local_setup.bash'
+[8.586s] INFO:colcon.colcon_core.shell:Creating prefix chain script '/home/mi/A_ws/install/setup.bash'
+[8.594s] INFO:colcon.colcon_core.shell:Creating prefix script '/home/mi/A_ws/install/local_setup.zsh'
+[8.597s] INFO:colcon.colcon_core.shell:Creating prefix chain script '/home/mi/A_ws/install/setup.zsh'
