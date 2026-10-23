@@ -1,24 +1,30 @@
 """独立于 ROS 的避障状态机与激光雷达扇区分析算法。"""
 
 import math
-from dataclasses import dataclass
+from collections import namedtuple
 
 
-@dataclass(frozen=True)
-class AvoidanceConfig:
-    """低速实验初始参数；阈值不是机器狗的已标定安全距离。"""
+class AvoidanceConfig(namedtuple('AvoidanceConfigBase', (
+        'emergency_distance', 'stop_distance', 'clear_distance',
+        'forward_speed', 'turn_speed', 'sensor_timeout', 'brake_duration',
+        'max_turn_duration', 'clear_samples'))):
+    """兼容 Python 3.6 的不可变配置；阈值仍需实机标定。"""
 
-    emergency_distance: float = 0.20
-    stop_distance: float = 0.40
-    clear_distance: float = 0.65
-    forward_speed: float = 0.10
-    turn_speed: float = 0.35
-    sensor_timeout: float = 0.50
-    brake_duration: float = 0.50
-    max_turn_duration: float = 6.0
-    clear_samples: int = 3
+    __slots__ = ()
 
-    def __post_init__(self):
+    def __new__(cls, emergency_distance=0.20, stop_distance=0.40,
+                clear_distance=0.65, forward_speed=0.10, turn_speed=0.35,
+                sensor_timeout=0.50, brake_duration=0.50,
+                max_turn_duration=6.0, clear_samples=3):
+        """沿用原默认值，用标准库 namedtuple 避免 dataclasses 依赖。"""
+        self = super().__new__(
+            cls, emergency_distance, stop_distance, clear_distance,
+            forward_speed, turn_speed, sensor_timeout, brake_duration,
+            max_turn_duration, clear_samples)
+        self._validate()
+        return self
+
+    def _validate(self):
         """检查阈值顺序、有限性及本实验允许的低速范围。"""
         positive = (
             self.emergency_distance, self.stop_distance,

@@ -3,7 +3,6 @@
 import json
 import math
 import time
-from dataclasses import fields
 
 from protocol.msg import MotionServoCmd
 from rclpy.clock import Clock, ClockType
@@ -28,8 +27,8 @@ class UltrasonicAvoidance(Node):
         self.step_height = startup_parameter(self, 'step_height', 0.05)
         defaults = AvoidanceConfig()
         values = {
-            f.name: startup_parameter(self, f.name, getattr(defaults, f.name))
-            for f in fields(defaults)
+            name: startup_parameter(self, name, default)
+            for name, default in defaults._asdict().items()
         }
         self.controller = AvoidanceController(AvoidanceConfig(**values))
         if (not math.isfinite(self.step_height)
