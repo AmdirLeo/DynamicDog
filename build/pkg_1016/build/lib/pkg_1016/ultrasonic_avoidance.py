@@ -72,7 +72,8 @@ class UltrasonicAvoidance(Node):
             f'{mode}；namespace={self.get_namespace()}；控制周期=0.1s')
         if self.use_lidar:
             self.get_logger().info(
-                '雷达辅助已启用：前±30°、左前30～90°、右前−90～−30°；'
+                '雷达转向辅助已启用：超声波负责前方，雷达前±30°仅供诊断；'
+                '左前30～90°、右前−90～−30°用于转向判断；'
                 f'期望frame={lidar_config.scan_frame_id}；'
                 f'安装偏航修正={lidar_config.scan_yaw_offset} rad。'
                 '先用只观测模式确认传感器与机身的方向对应。')
@@ -123,6 +124,7 @@ class UltrasonicAvoidance(Node):
                 'state': state,
                 'enable_motion': self.enable_motion,
                 'use_lidar': self.use_lidar,
+                'front_control_source': 'ultrasonic',
                 'frame_id': self.frame_id,
                 'distance_m': self.controller.distance,
                 'last_sample_valid': self.range_valid,
@@ -149,7 +151,8 @@ class UltrasonicAvoidance(Node):
                         None if scan_age is None else round(scan_age, 3)),
                     'status': ('WAIT_SCAN' if report is None else
                                'STALE' if not fresh else report['status']),
-                    'clear_count': controller.scan_clear_count,
+                    'role': 'turn_assistance',
+                    'front_used_for_control': False,
                     'turn_direction': (
                         None if controller.turn_direction is None else
                         'left' if controller.turn_direction > 0 else 'right'),

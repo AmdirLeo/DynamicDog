@@ -1,6 +1,7 @@
 """超声波与 LaserScan 联合避障，纯 Python 实现，兼容 Python 3.6。
 
-前方雷达距离参与停车和恢复，左右前侧距离用于选择并保持转向方向。
+超声波独立判断前方停车和恢复，雷达左右前侧用于选择并保持转向方向。
+前方雷达扇区仅用于诊断，不参与运动决策；雷达不可用时禁止转向。
 只做安装偏航角修正，不实现 TF 平移变换、全局规划或完整机身碰撞检测。
 """
 
@@ -49,7 +50,7 @@ def control_sectors(ranges, angle_min, angle_max, angle_increment,
     """前方 ±30°，左前 30～90°，右前 −90～−30°，取有效最小距离。
 
     coverage 表示角度采样覆盖，valid_fraction 表示其中有效距离的比例。
-    即使覆盖不足，检测到的近距离仍可用于停车；未知方向不能用于放行。
+    侧方即使覆盖不足，检测到的近距离仍可阻止转向；未知侧不能用于转向。
     """
     sectors = {
         name: {'distance_m': None, 'sample_count': 0, 'valid_points': 0,
@@ -100,7 +101,7 @@ def control_sectors(ranges, angle_min, angle_max, angle_increment,
 
 
 class LidarAssistedController(AvoidanceController):
-    """任一前向传感器近障即制动；两者确认空旷才恢复前进。"""
+    """超声波负责前方；雷达仅在需要转向时判断侧方空间。"""
 
     def __init__(self, config=None, lidar_config=None):
         """选定的转向方向保持到前进恢复，选定侧被挡则停下等待。"""
@@ -111,17 +112,14 @@ class LidarAssistedController(AvoidanceController):
         self.scan_received = None
         self.scan_frame = ''
         self.scan_report = None
-        self.scan_clear_count = 0
         self.turn_direction = None
-        self.reason = '等待超声波与雷达数据'
+        self.reason = '等待超声波数据'
 
     def update_range(self, distance, minimum, maximum, now):
-        """超声波断流后必须重新确认雷达空旷，拒绝沿用旧计数。"""
+        """超声波断流或无效后重新确认前方，不沿用旧前进状态。"""
         gap = (self.last_received is None
                or now - self.last_received > self.config.sensor_timeout)
         valid = super().update_range(distance, minimum, maximum, now)
-        if gap or not valid or distance < self.config.clear_distance:
-            self.scan_clear_count = 0
         if gap or not valid:
             self._enter('WAIT_SENSOR', now)
         elif distance <= self.config.emergency_distance:
@@ -130,7 +128,7 @@ class LidarAssistedController(AvoidanceController):
 
     def update_scan(self, ranges, angle_min, angle_max, angle_increment,
                     range_min, range_max, frame_id, now):
-        """新扫描帧到来才增加确认次数；不使用未知坐标系的扫描。"""
+        """更新侧方观测；异常扫描打断转向，但不影响超声波空旷计数。"""
         config = self.lidar_config
         gap = (self.scan_received is None
                or now - self.scan_received > config.scan_timeout)
@@ -142,34 +140,30 @@ class LidarAssistedController(AvoidanceController):
         if frame_id != config.scan_frame_id:
             self.scan_report['status'] = 'FRAME_MISMATCH'
         sectors = self.scan_report['sectors']
-        front = sectors['front']
         near = any(s['distance_m'] is not None
                    and s['distance_m'] <= self.config.emergency_distance
-                   for s in sectors.values())
-        clear = (self.scan_report['status'] == 'OK'
-                 and front['known'] and not near
-                 and front['distance_m'] >= self.config.clear_distance)
-        if gap or not clear:
-            self.scan_clear_count = 0
-            self.clear_count = 0
-        if (gap or self.scan_report['status'] != 'OK'
-                or not front['known']):
-            self._enter('WAIT_SCAN', now)
-        elif near:
-            self._enter('LIDAR_TOO_CLOSE', now)
-        if clear:
-            self.scan_clear_count += 1
+                   for s in (sectors['left'], sectors['right']))
+        # 记录控制周期之间的断流或受阻，恢复后先制动再转向。
+        if self.state in ('BRAKE', 'TURN'):
+            if gap or self.scan_report['status'] != 'OK':
+                self._enter('WAIT_SCAN', now)
+            elif near:
+                self._enter('LIDAR_TOO_CLOSE', now)
+            elif self.turn_direction is not None:
+                side = sectors['left' if self.turn_direction > 0 else 'right']
+                if (not side['known']
+                        or side['distance_m'] < config.turn_clearance):
+                    self._enter('BLOCKED', now)
 
     def _stop(self, state, now, reason, reset=False):
         if reset:
             self.clear_count = 0
-            self.scan_clear_count = 0
         self.reason = reason
         self._enter(state, now)
         return (0.0, 0.0)
 
     def command(self, now):
-        """执行融合判断，不因转向持续时间而退出或锁死。"""
+        """先按超声波判断前方；仅需转向时检查雷达，不限制转向时长。"""
         c = self.config
         lc = self.lidar_config
         if (self.last_received is None or self.distance is None
@@ -177,34 +171,29 @@ class LidarAssistedController(AvoidanceController):
             return self._stop('WAIT_SENSOR', now, '超声波无效或超时', True)
         if self.distance <= c.emergency_distance:
             return self._stop('TOO_CLOSE', now, '超声波距离过近', True)
+        if self.clear_count >= c.clear_samples:
+            self.turn_direction = None
+            self.reason = '超声波连续确认前方空旷'
+            self._enter('FORWARD', now)
+            return (c.forward_speed, 0.0)
+        if self.state == 'FORWARD' and self.distance > c.stop_distance:
+            self.reason = '前进中，超声波距离高于停车阈值'
+            return (c.forward_speed, 0.0)
+        if self.distance >= c.clear_distance:
+            return self._stop('WAIT_CLEAR', now, '等待超声波连续空旷确认')
+        # 此处需要转向：雷达缺失、过期或无可用侧方时停车等待。
         if (self.scan_received is None
                 or now - self.scan_received > lc.scan_timeout):
-            return self._stop('WAIT_SCAN', now, '雷达未接收或超时', True)
+            return self._stop('WAIT_SCAN', now, '需要转向，但雷达未接收或超时')
         if self.scan_report['status'] != 'OK':
             return self._stop(
-                'WAIT_SCAN', now, self.scan_report['status'], True)
+                'WAIT_SCAN', now, '需要转向，但雷达异常：' + self.scan_report['status'])
         sectors = self.scan_report['sectors']
         if any(s['distance_m'] is not None
                and s['distance_m'] <= c.emergency_distance
-               for s in sectors.values()):
+               for s in (sectors['left'], sectors['right'])):
             return self._stop(
-                'LIDAR_TOO_CLOSE', now, '雷达前方或侧方距离过近', True)
-        front = sectors['front']
-        if not front['known']:
-            return self._stop('WAIT_SCAN', now, '前方雷达覆盖或有效点不足', True)
-        if (self.clear_count >= c.clear_samples
-                and self.scan_clear_count >= c.clear_samples):
-            self.turn_direction = None
-            self.reason = '超声波与雷达连续确认前方空旷'
-            self._enter('FORWARD', now)
-            return (c.forward_speed, 0.0)
-        if (self.state == 'FORWARD' and self.distance > c.stop_distance
-                and front['distance_m'] > c.stop_distance):
-            self.reason = '前进中，两项前向距离均高于停车阈值'
-            return (c.forward_speed, 0.0)
-        if (self.distance >= c.clear_distance
-                and front['distance_m'] >= c.clear_distance):
-            return self._stop('WAIT_CLEAR', now, '等待两项测距的连续空旷确认')
+                'LIDAR_TOO_CLOSE', now, '雷达侧方距离过近，暂停转向')
         available = {
             side: sectors[side]['distance_m']
             for side in ('left', 'right')
