@@ -13,6 +13,7 @@ from std_msgs.msg import String
 from pkg_1016.ros_helpers import latest_sensor_qos, run_node, startup_parameter
 from pkg_1016.topic_logic import AvoidanceConfig, AvoidanceController
 from pkg_1016.lidar_assisted import LidarAssistedController, LidarConfig
+from pkg_1016.stand_guard import StandGuard
 
 
 class UltrasonicAvoidance(Node):
@@ -26,6 +27,15 @@ class UltrasonicAvoidance(Node):
         self.motion_value = startup_parameter(self, 'motion_value', 2)
         self.cmd_source = startup_parameter(self, 'cmd_source', 0)
         self.step_height = startup_parameter(self, 'step_height', 0.05)
+        self.auto_stand = startup_parameter(self, 'auto_stand', False)
+        posture_timeout = startup_parameter(self, 'posture_timeout', 1.0)
+        stand_timeout = startup_parameter(self, 'stand_timeout', 25.0)
+        self.stand_guard = (
+            StandGuard(self.motion_id, posture_timeout, stand_timeout)
+            if self.auto_stand else None)
+        self.stand_client = None
+        self.stand_future = None
+        self.servo_active = False
         defaults = AvoidanceConfig()
         values = {
             name: startup_parameter(self, name, default)
@@ -59,6 +69,16 @@ class UltrasonicAvoidance(Node):
         if self.use_lidar:
             self.scan_subscription = self.create_subscription(
                 LaserScan, 'scan', self.on_scan, latest_sensor_qos())
+        if self.auto_stand:
+            # 未启用此功能时不要求旧版 protocol 提供新接口。
+            from protocol.msg import MotionStatus
+            from protocol.srv import MotionResultCmd
+            self.stand_service_type = MotionResultCmd
+            self.posture_subscription = self.create_subscription(
+                MotionStatus, 'motion_status', self.on_posture, latest_sensor_qos())
+            if self.enable_motion:
+                self.stand_client = self.create_client(
+                    MotionResultCmd, 'motion_result_cmd')
         self.last_state = None
         self.last_report = float('-inf')
         self.frame_id = ''
@@ -70,6 +90,10 @@ class UltrasonicAvoidance(Node):
         mode = '实机运动已启用' if self.enable_motion else '只观测，不发布运动命令'
         self.get_logger().info(
             f'{mode}；namespace={self.get_namespace()}；控制周期=0.1s')
+        if self.auto_stand:
+            self.get_logger().info(
+                'auto_stand=true：启动时检查姿态，坐/趴时仅请求一次111恢复站立；'
+                '确认站稳后才发送步态。只观测模式不请求站立。')
         if self.use_lidar:
             self.get_logger().info(
                 '雷达转向辅助已启用：超声波负责前方，雷达前±30°仅供诊断；'
@@ -102,6 +126,53 @@ class UltrasonicAvoidance(Node):
         msg.vel_des = [float(vx), 0.0, float(wz)]
         msg.step_height = [self.step_height, self.step_height]
         self.motion_pub.publish(msg)
+        self.servo_active = not end
+
+    def on_posture(self, msg):
+        """读取明确的姿态/错误字段；无法解析时关闭运动门控。"""
+        try:
+            # 官方 CheckMotors 检查电机状态位 0～29。
+            healthy = (msg.ori_error == 0 and msg.footpos_error == 0
+                       and all((int(value) & 0x3fffffff) == 0
+                               for value in msg.motor_error)
+                       and 0 <= msg.order_process_bar <= 100)
+            self.stand_guard.update(
+                msg.motion_id, msg.switch_status, msg.order_process_bar,
+                healthy, time.monotonic())
+        except (AttributeError, TypeError, ValueError):
+            self.stand_guard.fail('MotionStatus 字段不兼容，不能判断姿态')
+
+    def posture_allows_motion(self, now):
+        """异步请求站立，不阻塞传感器回调，也不与步态指令竞争。"""
+        guard = self.stand_guard
+        if guard is None:
+            return True
+        if self.stand_future is not None and self.stand_future.done():
+            future = self.stand_future
+            self.stand_future = None
+            try:
+                response = future.result()
+                guard.result(response.result, response.motion_id, response.code)
+            except Exception as error:
+                guard.fail('站立服务异常：{}'.format(error))
+        action = guard.command(now)
+        if action == 'REQUEST' and self.stand_client is not None:
+            if self.stand_client.service_is_ready():
+                guard.requested(now)
+                try:
+                    request = self.stand_service_type.Request()
+                    request.motion_id = 111
+                    request.cmd_source = self.cmd_source
+                    request.duration = 0
+                    for name, size in (
+                            ('vel_des', 3), ('rpy_des', 3), ('pos_des', 3),
+                            ('acc_des', 6), ('ctrl_point', 3),
+                            ('foot_pose', 6), ('step_height', 2)):
+                        setattr(request, name, [0.0] * size)
+                    self.stand_future = self.stand_client.call_async(request)
+                except Exception as error:
+                    guard.fail('发送站立请求失败：{}'.format(error))
+        return action == 'WALK'
 
     def on_scan(self, msg):
         """直接订阅原始扫描，避免依赖另一个观察节点的 JSON 输出。"""
@@ -114,9 +185,19 @@ class UltrasonicAvoidance(Node):
     def on_timer(self):
         """以 10 Hz 发送命令，以 2 Hz 或状态变化时报告决策。"""
         now = time.monotonic()
-        vx, wz = self.controller.command(now)
-        self.publish_motion(vx, wz)
-        state = self.controller.state
+        allowed = self.posture_allows_motion(now)
+        if allowed:
+            vx, wz = self.controller.command(now)
+            self.publish_motion(vx, wz)
+            state = self.controller.state
+        else:
+            # 起身前的空旷样本不能直接用于起身后的前进确认。
+            self.controller.clear_count = 0
+            self.controller._enter('WAIT_SENSOR', now)
+            vx, wz = 0.0, 0.0
+            state = self.stand_guard.state
+            if self.servo_active:
+                self.publish_motion(0.0, 0.0, end=True)
         changed = state != self.last_state
         if changed or now - self.last_report >= 0.5:
             last = self.controller.last_received
@@ -124,6 +205,7 @@ class UltrasonicAvoidance(Node):
                 'state': state,
                 'enable_motion': self.enable_motion,
                 'use_lidar': self.use_lidar,
+                'auto_stand': self.auto_stand,
                 'front_control_source': 'ultrasonic',
                 'frame_id': self.frame_id,
                 'distance_m': self.controller.distance,
@@ -160,6 +242,22 @@ class UltrasonicAvoidance(Node):
                         report['sectors'] if report is not None and fresh
                         and report['status'] == 'OK' else None),
                 }
+            if self.stand_guard is not None:
+                guard = self.stand_guard
+                status['posture'] = {
+                    'state': guard.state,
+                    'reason': guard.reason,
+                    'motion_id': guard.motion_id,
+                    'switch_status': guard.switch_status,
+                    'progress': guard.progress,
+                    'healthy': guard.healthy,
+                    'receive_age_s': (None if guard.last_received is None
+                                      else round(now - guard.last_received, 3)),
+                    'stand_requested': guard.requested_at is not None,
+                    'response_code': guard.response_code,
+                }
+                if not allowed:
+                    status['reason'] = guard.reason
             text = json.dumps(status, ensure_ascii=False, allow_nan=False)
             msg = String()
             msg.data = text
@@ -171,7 +269,10 @@ class UltrasonicAvoidance(Node):
     def stop(self):
         """正常退出时发送零速度和结束帧；不能保证断电/强杀时送达。"""
         self.timer.cancel()
-        if self.motion_pub is None:
+        if self.stand_future is not None:
+            # 取消本地等待并不能撤回机器狗已经接收的服务请求。
+            self.stand_future.cancel()
+        if self.motion_pub is None or not self.servo_active:
             return
         for _ in range(3):
             self.publish_motion(0.0, 0.0)

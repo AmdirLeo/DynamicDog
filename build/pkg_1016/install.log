@@ -2,6 +2,7 @@
 /home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages/pkg_1016/ros_helpers.py
 /home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages/pkg_1016/lidar_assisted.py
 /home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages/pkg_1016/__init__.py
+/home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages/pkg_1016/stand_guard.py
 /home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages/pkg_1016/move.py
 /home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages/pkg_1016/lidar_observer.py
 /home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages/pkg_1016/topic_logic.py
@@ -10,6 +11,7 @@
 /home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages/pkg_1016/__pycache__/ros_helpers.cpython-36.pyc
 /home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages/pkg_1016/__pycache__/lidar_assisted.cpython-36.pyc
 /home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages/pkg_1016/__pycache__/__init__.cpython-36.pyc
+/home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages/pkg_1016/__pycache__/stand_guard.cpython-36.pyc
 /home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages/pkg_1016/__pycache__/move.cpython-36.pyc
 /home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages/pkg_1016/__pycache__/lidar_observer.cpython-36.pyc
 /home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages/pkg_1016/__pycache__/topic_logic.cpython-36.pyc

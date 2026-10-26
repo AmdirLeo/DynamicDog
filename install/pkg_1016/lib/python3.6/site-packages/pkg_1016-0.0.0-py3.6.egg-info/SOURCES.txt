@@ -14,6 +14,7 @@ pkg_1016/lidar_observer.py
 pkg_1016/move.py
 pkg_1016/node_helloworld.py
 pkg_1016/ros_helpers.py
+pkg_1016/stand_guard.py
 pkg_1016/topic_logic.py
 pkg_1016/ultrasonic_avoidance.py
 resource/pkg_1016
