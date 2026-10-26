@@ -1,0 +1,108 @@
+[0.000000] (-) TimerEvent: {}
+[0.002518] (pkg_1016) JobQueued: {'identifier': 'pkg_1016', 'dependencies': OrderedDict()}
+[0.004303] (pkg_1016) JobStarted: {'identifier': 'pkg_1016'}
+[0.100440] (-) TimerEvent: {}
+[0.204682] (-) TimerEvent: {}
+[0.307212] (-) TimerEvent: {}
+[0.409346] (-) TimerEvent: {}
+[0.510265] (-) TimerEvent: {}
+[0.611181] (-) TimerEvent: {}
+[0.712088] (-) TimerEvent: {}
+[0.813048] (-) TimerEvent: {}
+[0.914933] (-) TimerEvent: {}
+[1.015857] (-) TimerEvent: {}
+[1.118025] (-) TimerEvent: {}
+[1.218991] (-) TimerEvent: {}
+[1.319961] (-) TimerEvent: {}
+[1.420955] (-) TimerEvent: {}
+[1.521795] (-) TimerEvent: {}
+[1.622785] (-) TimerEvent: {}
+[1.723815] (-) TimerEvent: {}
+[1.824913] (-) TimerEvent: {}
+[1.928079] (-) TimerEvent: {}
+[2.029480] (-) TimerEvent: {}
+[2.131512] (-) TimerEvent: {}
+[2.234260] (-) TimerEvent: {}
+[2.335565] (-) TimerEvent: {}
+[2.436791] (-) TimerEvent: {}
+[2.538026] (-) TimerEvent: {}
+[2.638878] (-) TimerEvent: {}
+[2.739993] (-) TimerEvent: {}
+[2.841353] (-) TimerEvent: {}
+[2.942637] (-) TimerEvent: {}
+[3.043912] (-) TimerEvent: {}
+[3.145615] (-) TimerEvent: {}
+[3.247028] (-) TimerEvent: {}
+[3.349081] (-) TimerEvent: {}
+[3.450095] (-) TimerEvent: {}
+[3.551906] (-) TimerEvent: {}
+[3.652987] (-) TimerEvent: {}
+[3.753880] (-) TimerEvent: {}
+[3.854899] (-) TimerEvent: {}
+[3.955765] (-) TimerEvent: {}
+[4.057328] (-) TimerEvent: {}
+[4.160916] (-) TimerEvent: {}
+[4.231658] (pkg_1016) Command: {'cmd': ['/usr/bin/python3', 'setup.py', 'develop', '--prefix', '/home/mi/A_ws/install/pkg_1016', '--editable', '--build-directory', '/home/mi/A_ws/build/pkg_1016/build', '--no-deps', 'install_data', '--install-dir', '/home/mi/A_ws/install/pkg_1016'], 'cwd': '/home/mi/A_ws/build/pkg_1016', 'env': {'LESSOPEN': '| /usr/bin/lesspipe %s', 'MAIL': '/var/mail/mi', 'DOG_NS': '/mi_desktop_48_b0_2d_7b_03_fd', 'USER': 'mi', 'SSH_CLIENT': '10.0.0.169 52268 22', 'LD_LIBRARY_PATH': '/usr/lib/aarch64-linux-gnu/gazebo-11/plugins:/opt/ros2/galactic/opt/yaml_cpp_vendor/lib:/opt/ros2/galactic/opt/rviz_ogre_vendor/lib:/opt/ros2/galactic/lib:/opt/ros2/cyberdog/lib', 'BROWSER': '/home/mi/.vscode-server/cli/servers/Stable-ddc367ed5c8936efe395cffeec279b04ffd7db78/server/bin/helpers/browser.sh', 'SHLVL': '3', 'OLDPWD': '/home/mi', 'CYCLONEDDS_URI': 'file:///etc/mi/cyclonedds.xml', 'HOME': '/home/mi', 'TERM_PROGRAM_VERSION': '1.98.2', 'VSCODE_IPC_HOOK_CLI': '/run/user/1000/vscode-ipc-41701276-35f2-4c0d-90ef-8dd2ef17f92b.sock', 'ROS_PYTHON_VERSION': '3', 'SSL_CERT_FILE': '/usr/lib/ssl/certs/ca-certificates.crt', 'PYDEVD_DISABLE_FILE_VALIDATION': '1', 'BUNDLED_DEBUGPY_PATH': '/home/mi/.vscode-server/extensions/ms-python.debugpy-2026.6.0-linux-arm64/bundled/libs/debugpy', 'DBUS_SESSION_BUS_ADDRESS': 'unix:path=/run/user/1000/bus', 'COLORTERM': 'truecolor', 'COLCON_PREFIX_PATH': '/home/mi/A_ws/install:/opt/ros2/cyberdog:/opt/ros2/galactic', 'ROS_DISTRO': 'galactic', 'LOGNAME': 'mi', '_': '/usr/bin/colcon', 'ROS_VERSION': '2', 'CLAUDE_CODE_SSE_PORT': '36235', 'PKG_CONFIG_PATH': '/opt/ros2/galactic/lib/aarch64-linux-gnu/pkgconfig:/opt/ros2/galactic/lib/pkgconfig', 'XDG_SESSION_ID': '3', 'TERM': 'xterm-256color', 'ROS_LOCALHOST_ONLY': '0', 'PATH': '/home/mi/.vscode-server/cli/servers/Stable-ddc367ed5c8936efe395cffeec279b04ffd7db78/server/bin/remote-cli:/opt/ros2/galactic/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/home/mi/.vscode-server/data/User/globalStorage/github.copilot-chat/debugCommand:/home/mi/.vscode-server/extensions/ms-python.debugpy-2026.6.0-linux-arm64/bundled/scripts/noConfigScripts', 'XDG_RUNTIME_DIR': '/run/user/1000', 'SSL_CERT_DIR': '/usr/lib/ssl/certs', 'LANG': 'en_US.UTF-8', 'VSCODE_DEBUGPY_ADAPTER_ENDPOINTS': '/home/mi/.vscode-server/extensions/ms-python.debugpy-2026.6.0-linux-arm64/.noConfigDebugAdapterEndpoints/endpoint-b711f521a3cf5d2d.txt', 'PYTHONSTARTUP': '/home/mi/.vscode-server/data/User/workspaceStorage/91ee3e21cc6ee3fd77307c309fe32944/ms-python.python/pythonrc.py', 'RMW_IMPLEMENTATION': 'rmw_cyclonedds_cpp', 'LS_COLORS': 'rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=30;41:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:*.tgz=01;31:*.arc=01;31:*.arj=01;31:*.taz=01;31:*.lha=01;31:*.lz4=01;31:*.lzh=01;31:*.lzma=01;31:*.tlz=01;31:*.txz=01;31:*.tzo=01;31:*.t7z=01;31:*.zip=01;31:*.z=01;31:*.Z=01;31:*.dz=01;31:*.gz=01;31:*.lrz=01;31:*.lz=01;31:*.lzo=01;31:*.xz=01;31:*.zst=01;31:*.tzst=01;31:*.bz2=01;31:*.bz=01;31:*.tbz=01;31:*.tbz2=01;31:*.tz=01;31:*.deb=01;31:*.rpm=01;31:*.jar=01;31:*.war=01;31:*.ear=01;31:*.sar=01;31:*.rar=01;31:*.alz=01;31:*.ace=01;31:*.zoo=01;31:*.cpio=01;31:*.7z=01;31:*.rz=01;31:*.cab=01;31:*.wim=01;31:*.swm=01;31:*.dwm=01;31:*.esd=01;31:*.jpg=01;35:*.jpeg=01;35:*.mjpg=01;35:*.mjpeg=01;35:*.gif=01;35:*.bmp=01;35:*.pbm=01;35:*.pgm=01;35:*.ppm=01;35:*.tga=01;35:*.xbm=01;35:*.xpm=01;35:*.tif=01;35:*.tiff=01;35:*.png=01;35:*.svg=01;35:*.svgz=01;35:*.mng=01;35:*.pcx=01;35:*.mov=01;35:*.mpg=01;35:*.mpeg=01;35:*.m2v=01;35:*.mkv=01;35:*.webm=01;35:*.ogm=01;35:*.mp4=01;35:*.m4v=01;35:*.mp4v=01;35:*.vob=01;35:*.qt=01;35:*.nuv=01;35:*.wmv=01;35:*.asf=01;35:*.rm=01;35:*.rmvb=01;35:*.flc=01;35:*.avi=01;35:*.fli=01;35:*.flv=01;35:*.gl=01;35:*.dl=01;35:*.xcf=01;35:*.xwd=01;35:*.yuv=01;35:*.cgm=01;35:*.emf=01;35:*.ogv=01;35:*.ogx=01;35:*.aac=00;36:*.au=00;36:*.flac=00;36:*.m4a=00;36:*.mid=00;36:*.midi=00;36:*.mka=00;36:*.mp3=00;36:*.mpc=00;36:*.ogg=00;36:*.ra=00;36:*.wav=00;36:*.oga=00;36:*.opus=00;36:*.spx=00;36:*.xspf=00;36:', 'TERM_PROGRAM': 'vscode', 'VSCODE_GIT_IPC_HANDLE': '/run/user/1000/vscode-git-91879dcc66.sock', 'AMENT_PREFIX_PATH': '/home/mi/A_ws/install/pkg_1016:/home/mi/A_ws/install/pkg_1016:/opt/ros2/cyberdog:/opt/ros2/galactic', 'ROS_DOMAIN_ID': '42', 'SHELL': '/bin/bash', 'LESSCLOSE': '/usr/bin/lesspipe %s %s', 'PWD': '/home/mi/A_ws/build/pkg_1016', 'SSH_CONNECTION': '10.0.0.169 52268 10.0.0.12 22', 'XDG_DATA_DIRS': '/usr/local/share:/usr/share:/var/lib/snapd/desktop', 'PYTHONPATH': '/home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages:/home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages:/opt/ros2/cyberdog/lib/python3.6/site-packages:/opt/ros2/galactic/lib/python3.6/site-packages', 'COLCON': '1', 'CMAKE_PREFIX_PATH': '/opt/ros2/cyberdog:/opt/ros2/galactic'}, 'shell': False}
+[4.261412] (-) TimerEvent: {}
+[4.363130] (-) TimerEvent: {}
+[4.463995] (-) TimerEvent: {}
+[4.564972] (-) TimerEvent: {}
+[4.666419] (-) TimerEvent: {}
+[4.767318] (-) TimerEvent: {}
+[4.868308] (-) TimerEvent: {}
+[4.969235] (-) TimerEvent: {}
+[5.070224] (-) TimerEvent: {}
+[5.172366] (-) TimerEvent: {}
+[5.274003] (-) TimerEvent: {}
+[5.375014] (-) TimerEvent: {}
+[5.476514] (-) TimerEvent: {}
+[5.577437] (-) TimerEvent: {}
+[5.678485] (-) TimerEvent: {}
+[5.779917] (-) TimerEvent: {}
+[5.884105] (-) TimerEvent: {}
+[5.985818] (-) TimerEvent: {}
+[6.087828] (-) TimerEvent: {}
+[6.188931] (-) TimerEvent: {}
+[6.247739] (pkg_1016) StdoutLine: {'line': b'running develop\n'}
+[6.254441] (pkg_1016) StderrLine: {'line': b'/usr/local/lib/python3.6/dist-packages/setuptools/command/easy_install.py:159: EasyInstallDeprecationWarning: easy_install command is deprecated. Use build and pip and other standards-based tools.\n'}
+[6.255542] (pkg_1016) StderrLine: {'line': b'  EasyInstallDeprecationWarning,\n'}
+[6.272072] (pkg_1016) StderrLine: {'line': b'/usr/local/lib/python3.6/dist-packages/setuptools/command/install.py:37: SetuptoolsDeprecationWarning: setup.py install is deprecated. Use build and pip and other standards-based tools.\n'}
+[6.276037] (pkg_1016) StderrLine: {'line': b'  setuptools.SetuptoolsDeprecationWarning,\n'}
+[6.289167] (-) TimerEvent: {}
+[6.391007] (-) TimerEvent: {}
+[6.494183] (-) TimerEvent: {}
+[6.595180] (-) TimerEvent: {}
+[6.645384] (pkg_1016) StderrLine: {'line': b'/usr/local/lib/python3.6/dist-packages/pkg_resources/__init__.py:119: PkgResourcesDeprecationWarning: 0.18ubuntu0.18.04.1 is an invalid version and will not be supported in a future release\n'}
+[6.646235] (pkg_1016) StderrLine: {'line': b'  PkgResourcesDeprecationWarning,\n'}
+[6.695424] (-) TimerEvent: {}
+[6.796662] (-) TimerEvent: {}
+[6.897653] (-) TimerEvent: {}
+[7.000997] (-) TimerEvent: {}
+[7.103680] (-) TimerEvent: {}
+[7.208444] (-) TimerEvent: {}
+[7.313277] (-) TimerEvent: {}
+[7.400348] (pkg_1016) StdoutLine: {'line': b'running egg_info\n'}
+[7.402795] (pkg_1016) StdoutLine: {'line': b'writing pkg_1016.egg-info/PKG-INFO\n'}
+[7.407649] (pkg_1016) StdoutLine: {'line': b'writing dependency_links to pkg_1016.egg-info/dependency_links.txt\n'}
+[7.410181] (pkg_1016) StdoutLine: {'line': b'writing entry points to pkg_1016.egg-info/entry_points.txt\n'}
+[7.410747] (pkg_1016) StdoutLine: {'line': b'writing requirements to pkg_1016.egg-info/requires.txt\n'}
+[7.411212] (pkg_1016) StdoutLine: {'line': b'writing top-level names to pkg_1016.egg-info/top_level.txt\n'}
+[7.413457] (-) TimerEvent: {}
+[7.431616] (pkg_1016) StdoutLine: {'line': b"reading manifest file 'pkg_1016.egg-info/SOURCES.txt'\n"}
+[7.439247] (pkg_1016) StdoutLine: {'line': b"writing manifest file 'pkg_1016.egg-info/SOURCES.txt'\n"}
+[7.447684] (pkg_1016) StdoutLine: {'line': b'running build_ext\n'}
+[7.448790] (pkg_1016) StdoutLine: {'line': b'Creating /home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages/pkg-1016.egg-link (link to .)\n'}
+[7.454775] (pkg_1016) StdoutLine: {'line': b'Installing helloworld script to /home/mi/A_ws/install/pkg_1016/lib/pkg_1016\n'}
+[7.457091] (pkg_1016) StdoutLine: {'line': b'Installing lidar_observer script to /home/mi/A_ws/install/pkg_1016/lib/pkg_1016\n'}
+[7.458020] (pkg_1016) StdoutLine: {'line': b'Installing move_the_dog script to /home/mi/A_ws/install/pkg_1016/lib/pkg_1016\n'}
+[7.459010] (pkg_1016) StdoutLine: {'line': b'Installing ultrasonic_avoidance script to /home/mi/A_ws/install/pkg_1016/lib/pkg_1016\n'}
+[7.460286] (pkg_1016) StdoutLine: {'line': b'\n'}
+[7.461120] (pkg_1016) StdoutLine: {'line': b'Installed /home/mi/A_ws/build/pkg_1016\n'}
+[7.461815] (pkg_1016) StdoutLine: {'line': b'running install_data\n'}
+[7.462618] (pkg_1016) StdoutLine: {'line': b'copying package.xml -> /home/mi/A_ws/install/pkg_1016/share/pkg_1016\n'}
+[7.513787] (-) TimerEvent: {}
+[7.611671] (pkg_1016) CommandEnded: {'returncode': 0}
+[7.622662] (-) TimerEvent: {}
+[7.727822] (-) TimerEvent: {}
+[7.747732] (pkg_1016) JobEnded: {'identifier': 'pkg_1016', 'rc': 0}
+[7.754048] (-) EventReactorShutdown: {}

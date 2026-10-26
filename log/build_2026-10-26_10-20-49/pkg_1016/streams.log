@@ -1,0 +1,27 @@
+[4.231s] Invoking command in '/home/mi/A_ws/build/pkg_1016': PYTHONPATH=/home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages:${PYTHONPATH} /usr/bin/python3 setup.py develop --prefix /home/mi/A_ws/install/pkg_1016 --editable --build-directory /home/mi/A_ws/build/pkg_1016/build --no-deps install_data --install-dir /home/mi/A_ws/install/pkg_1016
+[6.245s] running develop
+[6.251s] /usr/local/lib/python3.6/dist-packages/setuptools/command/easy_install.py:159: EasyInstallDeprecationWarning: easy_install command is deprecated. Use build and pip and other standards-based tools.
+[6.251s]   EasyInstallDeprecationWarning,
+[6.271s] /usr/local/lib/python3.6/dist-packages/setuptools/command/install.py:37: SetuptoolsDeprecationWarning: setup.py install is deprecated. Use build and pip and other standards-based tools.
+[6.279s]   setuptools.SetuptoolsDeprecationWarning,
+[6.641s] /usr/local/lib/python3.6/dist-packages/pkg_resources/__init__.py:119: PkgResourcesDeprecationWarning: 0.18ubuntu0.18.04.1 is an invalid version and will not be supported in a future release
+[6.642s]   PkgResourcesDeprecationWarning,
+[7.396s] running egg_info
+[7.399s] writing pkg_1016.egg-info/PKG-INFO
+[7.405s] writing dependency_links to pkg_1016.egg-info/dependency_links.txt
+[7.406s] writing entry points to pkg_1016.egg-info/entry_points.txt
+[7.407s] writing requirements to pkg_1016.egg-info/requires.txt
+[7.407s] writing top-level names to pkg_1016.egg-info/top_level.txt
+[7.428s] reading manifest file 'pkg_1016.egg-info/SOURCES.txt'
+[7.435s] writing manifest file 'pkg_1016.egg-info/SOURCES.txt'
+[7.444s] running build_ext
+[7.445s] Creating /home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages/pkg-1016.egg-link (link to .)
+[7.451s] Installing helloworld script to /home/mi/A_ws/install/pkg_1016/lib/pkg_1016
+[7.453s] Installing lidar_observer script to /home/mi/A_ws/install/pkg_1016/lib/pkg_1016
+[7.454s] Installing move_the_dog script to /home/mi/A_ws/install/pkg_1016/lib/pkg_1016
+[7.455s] Installing ultrasonic_avoidance script to /home/mi/A_ws/install/pkg_1016/lib/pkg_1016
+[7.456s] 
+[7.457s] Installed /home/mi/A_ws/build/pkg_1016
+[7.458s] running install_data
+[7.458s] copying package.xml -> /home/mi/A_ws/install/pkg_1016/share/pkg_1016
+[7.614s] Invoked command in '/home/mi/A_ws/build/pkg_1016' returned '0': PYTHONPATH=/home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages:${PYTHONPATH} /usr/bin/python3 setup.py develop --prefix /home/mi/A_ws/install/pkg_1016 --editable --build-directory /home/mi/A_ws/build/pkg_1016/build --no-deps install_data --install-dir /home/mi/A_ws/install/pkg_1016

@@ -1,0 +1,38 @@
+[4.233s] Invoking command in '/home/mi/A_ws/build/pkg_1016': PYTHONPATH=/home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages:${PYTHONPATH} /usr/bin/python3 setup.py develop --prefix /home/mi/A_ws/install/pkg_1016 --uninstall --editable --build-directory /home/mi/A_ws/build/pkg_1016/build
+[5.861s] running develop
+[5.863s] /usr/local/lib/python3.6/dist-packages/setuptools/command/easy_install.py:159: EasyInstallDeprecationWarning: easy_install command is deprecated. Use build and pip and other standards-based tools.
+[5.864s]   EasyInstallDeprecationWarning,
+[5.869s] /usr/local/lib/python3.6/dist-packages/setuptools/command/install.py:37: SetuptoolsDeprecationWarning: setup.py install is deprecated. Use build and pip and other standards-based tools.
+[5.869s]   setuptools.SetuptoolsDeprecationWarning,
+[6.176s] /usr/local/lib/python3.6/dist-packages/pkg_resources/__init__.py:119: PkgResourcesDeprecationWarning: 0.18ubuntu0.18.04.1 is an invalid version and will not be supported in a future release
+[6.182s]   PkgResourcesDeprecationWarning,
+[7.032s] Invoked command in '/home/mi/A_ws/build/pkg_1016' returned '0': PYTHONPATH=/home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages:${PYTHONPATH} /usr/bin/python3 setup.py develop --prefix /home/mi/A_ws/install/pkg_1016 --uninstall --editable --build-directory /home/mi/A_ws/build/pkg_1016/build
+[7.040s] Invoking command in '/home/mi/A_ws/src/pkg_1016': PYTHONPATH=/home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages:${PYTHONPATH} /usr/bin/python3 setup.py egg_info --egg-base ../../build/pkg_1016 build --build-base /home/mi/A_ws/build/pkg_1016/build install --prefix /home/mi/A_ws/install/pkg_1016 --record /home/mi/A_ws/build/pkg_1016/install.log --single-version-externally-managed
+[8.563s] running egg_info
+[8.567s] writing ../../build/pkg_1016/pkg_1016.egg-info/PKG-INFO
+[8.568s] writing dependency_links to ../../build/pkg_1016/pkg_1016.egg-info/dependency_links.txt
+[8.569s] writing entry points to ../../build/pkg_1016/pkg_1016.egg-info/entry_points.txt
+[8.571s] writing requirements to ../../build/pkg_1016/pkg_1016.egg-info/requires.txt
+[8.571s] writing top-level names to ../../build/pkg_1016/pkg_1016.egg-info/top_level.txt
+[8.586s] reading manifest file '../../build/pkg_1016/pkg_1016.egg-info/SOURCES.txt'
+[8.592s] writing manifest file '../../build/pkg_1016/pkg_1016.egg-info/SOURCES.txt'
+[8.593s] running build
+[8.593s] running build_py
+[8.595s] copying pkg_1016/topic_logic.py -> /home/mi/A_ws/build/pkg_1016/build/lib/pkg_1016
+[8.597s] running install
+[8.598s] /usr/local/lib/python3.6/dist-packages/setuptools/command/install.py:37: SetuptoolsDeprecationWarning: setup.py install is deprecated. Use build and pip and other standards-based tools.
+[8.598s]   setuptools.SetuptoolsDeprecationWarning,
+[8.600s] running install_lib
+[8.604s] copying /home/mi/A_ws/build/pkg_1016/build/lib/pkg_1016/topic_logic.py -> /home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages/pkg_1016
+[8.607s] byte-compiling /home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages/pkg_1016/topic_logic.py to topic_logic.cpython-36.pyc
+[8.614s] running install_data
+[8.617s] running install_egg_info
+[8.624s] removing '/home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages/pkg_1016-0.0.0-py3.6.egg-info' (and everything under it)
+[8.626s] Copying ../../build/pkg_1016/pkg_1016.egg-info to /home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages/pkg_1016-0.0.0-py3.6.egg-info
+[8.631s] running install_scripts
+[8.721s] Installing helloworld script to /home/mi/A_ws/install/pkg_1016/lib/pkg_1016
+[8.722s] Installing lidar_observer script to /home/mi/A_ws/install/pkg_1016/lib/pkg_1016
+[8.723s] Installing move_the_dog script to /home/mi/A_ws/install/pkg_1016/lib/pkg_1016
+[8.724s] Installing ultrasonic_avoidance script to /home/mi/A_ws/install/pkg_1016/lib/pkg_1016
+[8.725s] writing list of installed files to '/home/mi/A_ws/build/pkg_1016/install.log'
+[8.837s] Invoked command in '/home/mi/A_ws/src/pkg_1016' returned '0': PYTHONPATH=/home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages:${PYTHONPATH} /usr/bin/python3 setup.py egg_info --egg-base ../../build/pkg_1016 build --build-base /home/mi/A_ws/build/pkg_1016/build install --prefix /home/mi/A_ws/install/pkg_1016 --record /home/mi/A_ws/build/pkg_1016/install.log --single-version-externally-managed

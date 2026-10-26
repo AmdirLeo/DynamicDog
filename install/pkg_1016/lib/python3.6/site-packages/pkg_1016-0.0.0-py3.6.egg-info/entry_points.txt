@@ -1,4 +1,6 @@
 [console_scripts]
 helloworld = pkg_1016.node_helloworld:main
+lidar_observer = pkg_1016.lidar_observer:main
 move_the_dog = pkg_1016.move:main
+ultrasonic_avoidance = pkg_1016.ultrasonic_avoidance:main
 

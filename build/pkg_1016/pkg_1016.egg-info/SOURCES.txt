@@ -9,9 +9,16 @@ setup.py
 ../../build/pkg_1016/pkg_1016.egg-info/top_level.txt
 ../../build/pkg_1016/pkg_1016.egg-info/zip-safe
 pkg_1016/__init__.py
+pkg_1016/lidar_assisted.py
+pkg_1016/lidar_observer.py
 pkg_1016/move.py
 pkg_1016/node_helloworld.py
+pkg_1016/ros_helpers.py
+pkg_1016/topic_logic.py
+pkg_1016/ultrasonic_avoidance.py
 resource/pkg_1016
 test/test_copyright.py
 test/test_flake8.py
+test/test_lidar_assisted.py
 test/test_pep257.py
+test/test_topic_logic.py

@@ -114,6 +114,7 @@ class AvoidanceController:
 
 def analyse_scan(ranges, angle_min, angle_increment, range_min, range_max,
                  warning_distance=0.40):
+    print("Ranges:", ranges)
     """计算传感器坐标系四个 90° 扇区的最近距离，不推断未知区域。"""
     if not math.isfinite(warning_distance) or warning_distance <= 0:
         raise ValueError('warning_distance 必须是有限正数')
