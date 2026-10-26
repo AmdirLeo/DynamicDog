@@ -35,7 +35,7 @@ def tick(controller, now, ultrasound=1.0, **kwargs):
 
 
 def moving():
-    """进入两项传感器都确认空旷的前进状态。"""
+    """进入超声波确认空旷的前进状态。"""
     controller = LidarAssistedController()
     for now in (0.0, 0.1, 0.2, 0.3):
         command = tick(controller, now)
@@ -54,18 +54,17 @@ def turning(left=1.5, right=0.8):
     return controller
 
 
-def test_start_requires_new_samples_from_both_sensors():
-    """控制定时器重复调用不能代替新超声波和新扫描。"""
+def test_start_requires_new_ultrasound_samples_only():
+    """定时器和扫描均不能代替超声波的新样本；前进不依赖雷达。"""
     controller = LidarAssistedController()
     assert controller.command(0.0) == (0.0, 0.0)
-    tick(controller, 0.0)
-    for now in (0.1, 0.2, 0.3):
-        controller.update_range(1.0, 0.1, 1.0, now)
+    controller.update_range(1.0, 0.1, 1.0, 0.0)
+    for now in (0.0, 0.1, 0.2):
+        scan(controller, now)
         assert controller.command(now) == (0.0, 0.0)
-    assert controller.scan_clear_count == 1
-    scan(controller, 0.3)
+    controller.update_range(1.0, 0.1, 1.0, 0.3)
     assert controller.command(0.3) == (0.0, 0.0)
-    scan(controller, 0.4)
+    controller.update_range(1.0, 0.1, 1.0, 0.4)
     assert controller.command(0.4) == (0.15, 0.0)
 
 
@@ -84,22 +83,35 @@ def test_sensor_callback_order_does_not_prevent_start(scan_first):
     assert command == (0.15, 0.0)
 
 
-@pytest.mark.parametrize('ultrasound,front', [(0.3, 1.0), (1.0, 0.3)])
-def test_either_front_sensor_can_stop_forward_motion(ultrasound, front):
-    """超声波漏检但雷达发现前障碍时同样制动。"""
+def test_ultrasound_stops_forward_motion_with_clear_lidar():
+    """超声波发现前方障碍即停车，雷达空旷不能否决。"""
     controller = moving()
-    assert tick(controller, 0.4, ultrasound=ultrasound,
-                front=front) == (0.0, 0.0)
+    assert tick(controller, 0.4, ultrasound=0.3) == (0.0, 0.0)
     assert controller.state == 'BRAKE'
-    assert tick(controller, 0.9, ultrasound=ultrasound,
-                front=front) == (0.0, 0.5)
+    assert tick(controller, 0.9, ultrasound=0.3) == (0.0, 0.5)
 
 
-def test_lidar_front_hysteresis_preserves_forward_motion():
-    """前进过程中两项读数均高于停车阈值即可保持。"""
+def test_ultrasound_hysteresis_preserves_forward_motion():
+    """只有超声波控制前进滞回，雷达前方过近不影响。"""
     controller = moving()
-    assert tick(controller, 0.4, ultrasound=0.5, front=0.5) == (0.15, 0.0)
-    assert tick(controller, 0.5, front=0.4) == (0.0, 0.0)
+    assert tick(controller, 0.4, ultrasound=0.5, front=0.02) == (0.15, 0.0)
+    assert tick(controller, 0.5, ultrasound=0.4, front=1.0) == (0.0, 0.0)
+
+
+@pytest.mark.parametrize('front', [0.02, 0.18, math.nan, math.inf])
+def test_bad_lidar_front_does_not_block_start_turn_or_recovery(front):
+    """前方近点和未知不阻止起步、避障转向或恢复，原值仍保留诊断。"""
+    controller = LidarAssistedController()
+    for now in (0.0, 0.1, 0.2):
+        command = tick(controller, now, front=front)
+    assert command == (0.15, 0.0)
+    sector = controller.scan_report['sectors']['front']
+    assert sector['distance_m'] == (front if math.isfinite(front) else None)
+    assert tick(controller, 0.3, ultrasound=0.3, front=front) == (0.0, 0.0)
+    assert tick(controller, 0.8, ultrasound=0.3, front=front) == (0.0, 0.5)
+    for now in (0.9, 1.0):
+        assert tick(controller, now, front=front) == (0.0, 0.0)
+    assert tick(controller, 1.1, front=front) == (0.15, 0.0)
 
 
 @pytest.mark.parametrize('left,right,expected', [
@@ -164,11 +176,12 @@ def test_clear_front_resumes_and_releases_direction_lock():
                 left=0.8, right=1.5) == (0.0, -0.5)
 
 
-@pytest.mark.parametrize('side', ['front', 'left', 'right'])
-def test_two_centimetre_return_is_retained_and_stops(side):
-    """不擅自过滤实机曾出现的约 2 cm 有效近距离。"""
+@pytest.mark.parametrize('side', ['left', 'right'])
+def test_side_emergency_blocks_turning_only(side):
+    """两侧近点保留，只在需要转向时阻止运动。"""
     controller = moving()
-    assert tick(controller, 0.4, **{side: 0.02}) == (0.0, 0.0)
+    assert tick(controller, 0.4, **{side: 0.02}) == (0.15, 0.0)
+    assert tick(controller, 0.5, ultrasound=0.3, **{side: 0.02}) == (0.0, 0.0)
     assert controller.state == 'LIDAR_TOO_CLOSE'
 
 
@@ -181,25 +194,53 @@ def test_ultrasonic_emergency_and_invalid_remain_stop_conditions():
     assert controller.state == 'WAIT_SENSOR'
 
 
-def test_scan_timeout_stops_despite_fresh_ultrasound():
-    """雷达断流时不降级为继续使用超声波向前走。"""
-    controller = moving()
-    controller.update_range(1.0, 0.1, 1.0, 0.9)
-    assert controller.command(0.9) == (0.0, 0.0)
+def test_missing_scan_allows_forward_but_stops_at_ultrasound_obstacle():
+    """雷达未接收不阻止超声波起步，但不能盲目转向。"""
+    controller = LidarAssistedController()
+    for now in (0.0, 0.1, 0.2):
+        controller.update_range(1.0, 0.1, 1.0, now)
+        command = controller.command(now)
+    assert command == (0.15, 0.0)
+    controller.update_range(0.3, 0.1, 1.0, 0.3)
+    assert controller.command(0.3) == (0.0, 0.0)
     assert controller.state == 'WAIT_SCAN'
-    assert controller.scan_clear_count == controller.clear_count == 0
-    assert tick(controller, 1.0) == (0.0, 0.0)
-    assert tick(controller, 1.1) == (0.0, 0.0)
-    assert tick(controller, 1.2) == (0.0, 0.0)
-    assert tick(controller, 1.3) == (0.15, 0.0)
 
 
-def test_scan_gap_without_timer_resets_both_confirmations():
-    """即使断流期间未运行定时器，恢复采样也不沿用旧确认。"""
+def test_scan_timeout_does_not_stop_forward_with_fresh_ultrasound():
+    """雷达超时不会清空超声波确认或阻止直行；需要转向时停车。"""
+    controller = moving()
+    for now in (0.4, 0.6, 0.9):
+        controller.update_range(1.0, 0.1, 1.0, now)
+        assert controller.command(now) == (0.15, 0.0)
+    controller.update_range(0.3, 0.1, 1.0, 1.0)
+    assert controller.command(1.0) == (0.0, 0.0)
+    assert controller.state == 'WAIT_SCAN'
+
+
+@pytest.mark.parametrize('timer_during_gap', [False, True])
+def test_scan_gap_during_turn_requires_braking_on_recovery(timer_during_gap):
+    """转向时雷达断流须停；恢复前后均运行或跳过定时器都要重新制动。"""
+    controller = turning()
+    controller.update_range(0.3, 0.1, 1.0, 0.8)
+    controller.update_range(0.3, 0.1, 1.0, 1.1)
+    if timer_during_gap:
+        assert controller.command(1.1) == (0.0, 0.0)
+        assert controller.state == 'WAIT_SCAN'
+    scan(controller, 1.1)
+    assert controller.command(1.1) == (0.0, 0.0)
+    assert controller.state == 'BRAKE'
+    tick(controller, 1.4, ultrasound=0.3)
+    assert tick(controller, 1.7, ultrasound=0.3) == (0.0, 0.5)
+    assert controller.turn_direction == 1
+
+
+def test_ultrasound_gap_without_timer_requires_new_confirmations():
+    """超声波断流后即使回调先恢复，也不能沿用前进状态。"""
     controller = moving()
     assert tick(controller, 1.0) == (0.0, 0.0)
-    assert controller.clear_count == 0
-    assert controller.scan_clear_count == 1
+    assert controller.clear_count == 1
+    assert tick(controller, 1.1) == (0.0, 0.0)
+    assert tick(controller, 1.2) == (0.15, 0.0)
 
 
 def test_ultrasound_timeout_stops_despite_fresh_scan():
@@ -210,36 +251,51 @@ def test_ultrasound_timeout_stops_despite_fresh_scan():
     assert controller.state == 'WAIT_SENSOR'
 
 
-@pytest.mark.parametrize('kwargs', [
-    {'frame': 'unexpected_frame'}, {'front': math.nan},
-])
-def test_frame_mismatch_or_unknown_front_stops(kwargs):
-    """坐标系名不符或前方缺测时不生成非零速度。"""
+def test_wrong_frame_blocks_turn_but_not_forward():
+    """错误坐标系不影响超声波直行，但不能用于选择转向。"""
     controller = moving()
-    assert tick(controller, 0.4, **kwargs) == (0.0, 0.0)
+    assert tick(controller, 0.4, frame='wrong_frame') == (0.15, 0.0)
+    assert tick(controller, 0.5, ultrasound=0.3, frame='wrong_frame') == (0.0, 0.0)
     assert controller.state == 'WAIT_SCAN'
 
 
-def test_bad_frame_then_recovery_before_timer_still_requires_confirmation():
-    """异常扫描在定时器前被新帧替换，也不能沿用前进状态放行。"""
-    controller = moving()
-    scan(controller, 0.4, frame='wrong_frame')
-    scan(controller, 0.41)
-    controller.update_range(1.0, 0.1, 1.0, 0.42)
-    assert controller.command(0.42) == (0.0, 0.0)
-    assert controller.state == 'WAIT_CLEAR'
+@pytest.mark.parametrize('failure', ['frame', 'metadata', 'near', 'unknown', 'blocked'])
+def test_bad_scan_replaced_before_timer_still_interrupts_turn(failure):
+    """转向侧失效后立即恢复，也需要重新制动，不能漏过异常帧。"""
+    controller = turning()
+    if failure == 'metadata':
+        controller.update_scan([], 0, 0, 0, 0.01, 30, 'laser_frame', 0.6)
+    else:
+        kwargs = {'frame': 'wrong_frame'} if failure == 'frame' else {
+            'left': {'near': 0.02, 'unknown': math.nan, 'blocked': 0.3}[failure]}
+        scan(controller, 0.6, **kwargs)
+    scan(controller, 0.61)
+    controller.update_range(0.3, 0.1, 1.0, 0.62)
+    assert controller.command(0.62) == (0.0, 0.0)
+    assert controller.state == 'BRAKE'
+    assert controller.turn_direction == 1
 
 
-def test_sparse_sector_is_unknown_but_near_return_still_stops():
-    """一个远点不能代表整片空旷，一个可信近点仍可要求停车。"""
-    controller = moving()
+def test_sparse_side_is_unknown_but_near_return_still_blocks_turn():
+    """一个远点不能确认转向空间，一个近点仍可阻止转向。"""
+    controller = LidarAssistedController()
     values = [math.nan] * 181
-    values[90] = 1.0
-    assert tick(controller, 0.4, ranges=values) == (0.0, 0.0)
-    assert controller.state == 'WAIT_SCAN'
-    values[90] = 0.02
-    assert tick(controller, 0.5, ranges=values) == (0.0, 0.0)
+    values[150] = 1.0
+    assert tick(controller, 0.0, ultrasound=0.3, ranges=values) == (0.0, 0.0)
+    assert controller.state == 'BLOCKED'
+    values[150] = 0.02
+    assert tick(controller, 0.1, ultrasound=0.3, ranges=values) == (0.0, 0.0)
     assert controller.state == 'LIDAR_TOO_CLOSE'
+
+
+def test_front_recovery_works_even_with_unavailable_sides():
+    """超声波确认前方空旷即可解除转向受阻；雷达前方及侧方无需确认。"""
+    controller = turning()
+    assert tick(controller, 0.6, ultrasound=0.3, left=math.nan) == (0.0, 0.0)
+    for now in (0.7, 0.8, 0.9):
+        command = tick(controller, now, front=0.02, left=math.nan, right=math.nan)
+    assert command == (0.15, 0.0)
+    assert controller.turn_direction is None
 
 
 def test_partial_angular_coverage_cannot_be_treated_as_full_sector():
