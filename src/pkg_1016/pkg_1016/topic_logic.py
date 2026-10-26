@@ -7,20 +7,19 @@ from collections import namedtuple
 class AvoidanceConfig(namedtuple('AvoidanceConfigBase', (
         'emergency_distance', 'stop_distance', 'clear_distance',
         'forward_speed', 'turn_speed', 'sensor_timeout', 'brake_duration',
-        'max_turn_duration', 'clear_samples'))):
-    """兼容 Python 3.6 的不可变配置；阈值仍需实机标定。"""
+        'clear_samples'))):
+    """兼容 Python 3.6 的不可变配置；使用实机调试后的速度。"""
 
     __slots__ = ()
 
     def __new__(cls, emergency_distance=0.20, stop_distance=0.40,
-                clear_distance=0.65, forward_speed=0.10, turn_speed=0.35,
-                sensor_timeout=0.50, brake_duration=0.50,
-                max_turn_duration=6.0, clear_samples=3):
-        """沿用原默认值，用标准库 namedtuple 避免 dataclasses 依赖。"""
+                clear_distance=0.65, forward_speed=0.15, turn_speed=0.50,
+                sensor_timeout=0.50, brake_duration=0.50, clear_samples=3):
+        """持续遇障时不限制转向时长，保留近距离和断流停车。"""
         self = super().__new__(
             cls, emergency_distance, stop_distance, clear_distance,
             forward_speed, turn_speed, sensor_timeout, brake_duration,
-            max_turn_duration, clear_samples)
+            clear_samples)
         self._validate()
         return self
 
@@ -29,7 +28,7 @@ class AvoidanceConfig(namedtuple('AvoidanceConfigBase', (
         positive = (
             self.emergency_distance, self.stop_distance,
             self.clear_distance, self.forward_speed, self.sensor_timeout,
-            self.brake_duration, self.max_turn_duration,
+            self.brake_duration,
         )
         if any(not math.isfinite(v) or v <= 0 for v in positive):
             raise ValueError('距离、前向速度和时间必须是有限正数')
@@ -57,7 +56,6 @@ class AvoidanceController:
         self.last_received = None
         self.clear_count = 0
         self.state_since = 0.0
-        self.turn_since = None
 
     def update_range(self, distance, minimum, maximum, now):
         """每条新消息调用一次；无穷值、越界值和非法量程均无效。"""
@@ -84,15 +82,9 @@ class AvoidanceController:
             self.state_since = now
 
     def command(self, now):
-        """计算本周期命令；转向超时后锁定 FAULT，重启节点才能解除。"""
+        """有效测距持续遇障时保持转向，确认空旷后恢复前进。"""
         c = self.config
         stopped = (0.0, 0.0)
-        if self.state == 'FAULT':
-            return stopped
-        if (self.turn_since is not None
-                and now - self.turn_since >= c.max_turn_duration):
-            self._enter('FAULT', now)
-            return stopped
         if (self.last_received is None or self.distance is None
                 or now - self.last_received > c.sensor_timeout):
             self.clear_count = 0
@@ -102,7 +94,6 @@ class AvoidanceController:
             self._enter('TOO_CLOSE', now)
             return stopped
         if self.clear_count >= c.clear_samples:
-            self.turn_since = None
             self._enter('FORWARD', now)
             return (c.forward_speed, 0.0)
         if self.state == 'FORWARD' and self.distance > c.stop_distance:
@@ -117,8 +108,6 @@ class AvoidanceController:
         if self.state == 'BRAKE':
             if now - self.state_since < c.brake_duration:
                 return stopped
-            if self.turn_since is None:
-                self.turn_since = now
             self._enter('TURN', now)
         return (0.0, c.turn_speed)
 

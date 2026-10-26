@@ -4,7 +4,8 @@ import math
 
 import pytest
 
-from pkg_1016.topic_logic import AvoidanceConfig, AvoidanceController, analyse_scan
+from pkg_1016.topic_logic import AvoidanceConfig, AvoidanceController
+from pkg_1016.topic_logic import analyse_scan
 
 
 def receive(controller, distance, now):
@@ -30,17 +31,17 @@ def test_startup_requires_three_new_samples():
         assert controller.command(now) == (0.0, 0.0)
     assert controller.clear_count == 1
     assert receive(controller, 1.0, 0.1) == (0.0, 0.0)
-    assert receive(controller, 1.0, 0.2) == (0.1, 0.0)
+    assert receive(controller, 1.0, 0.2) == (0.15, 0.0)
 
 
 def test_hysteresis_brake_and_turn():
     """前进中超过停车阈值继续行走，遇障先制动后转向。"""
     controller = moving_controller()
-    assert receive(controller, 0.50, 0.3) == (0.1, 0.0)
+    assert receive(controller, 0.50, 0.3) == (0.15, 0.0)
     assert receive(controller, 0.40, 0.4) == (0.0, 0.0)
     assert controller.state == 'BRAKE'
     assert receive(controller, 0.30, 0.8) == (0.0, 0.0)
-    assert receive(controller, 0.30, 1.0) == (0.0, 0.35)
+    assert receive(controller, 0.30, 1.0) == (0.0, 0.50)
     assert controller.state == 'TURN'
 
 
@@ -53,7 +54,7 @@ def test_turn_stops_for_close_object_and_requires_clear_confirmation():
     assert controller.state == 'TOO_CLOSE'
     assert receive(controller, 0.65, 0.7) == (0.0, 0.0)
     assert receive(controller, 0.65, 0.8) == (0.0, 0.0)
-    assert receive(controller, 0.65, 0.9) == (0.1, 0.0)
+    assert receive(controller, 0.65, 0.9) == (0.15, 0.0)
 
 
 def test_receive_timeout_stops_and_resets_confirmation():
@@ -64,7 +65,7 @@ def test_receive_timeout_stops_and_resets_confirmation():
     assert controller.clear_count == 0
     assert receive(controller, 1.0, 0.8) == (0.0, 0.0)
     assert receive(controller, 1.0, 0.9) == (0.0, 0.0)
-    assert receive(controller, 1.0, 1.0) == (0.1, 0.0)
+    assert receive(controller, 1.0, 1.0) == (0.15, 0.0)
 
 
 def test_sampling_gap_resets_count_even_without_timer():
@@ -76,7 +77,9 @@ def test_sampling_gap_resets_count_even_without_timer():
     assert controller.clear_count == 1
 
 
-@pytest.mark.parametrize('distance', [math.nan, math.inf, -math.inf, -1.0, 4.1])
+@pytest.mark.parametrize('distance', [
+    math.nan, math.inf, -math.inf, -1.0, 4.1,
+])
 def test_invalid_range_immediately_stops(distance):
     """无效单帧不允许维持上一帧非零速度。"""
     controller = moving_controller()
@@ -94,29 +97,56 @@ def test_invalid_range_metadata_stops(minimum, maximum):
     assert controller.command(0.3) == (0.0, 0.0)
 
 
-def test_turn_timeout_latches_despite_new_clear_samples():
-    """无法绕开障碍时不能无限旋转，超时故障不会自动解除。"""
+def test_continuous_obstacle_keeps_turning_then_clear_samples_resume():
+    """持续有效遇障超过 60 秒仍转向，三条新空旷采样后前进。"""
     controller = AvoidanceController()
     receive(controller, 0.3, 0.0)
-    assert receive(controller, 0.3, 0.5) == (0.0, 0.35)
-    for i in range(6, 66):
-        receive(controller, 0.3, i / 10)
-    assert controller.state == 'FAULT'
-    for now in (6.6, 6.7, 6.8):
+    assert receive(controller, 0.3, 0.5) == (0.0, 0.50)
+    for i in range(6, 606):
+        assert receive(controller, 0.3, i / 10) == (0.0, 0.50)
+        assert controller.state == 'TURN'
+    for now in (60.6, 60.7):
         assert receive(controller, 1.0, now) == (0.0, 0.0)
+    assert receive(controller, 1.0, 60.8) == (0.15, 0.0)
+    assert controller.state == 'FORWARD'
 
 
-def test_dropout_does_not_restart_turn_budget():
-    """转向过程发生丢帧，不能反复恢复来绕过最长转向限制。"""
+def test_dropout_stops_turning_and_valid_obstacle_resumes_after_brake():
+    """持续转向仍受断流保护，恢复有效遇障数据后先制动再转向。"""
     controller = AvoidanceController()
     receive(controller, 0.3, 0.0)
     receive(controller, 0.3, 0.5)
     assert controller.command(1.1) == (0.0, 0.0)
-    receive(controller, 0.3, 2.0)
-    receive(controller, 0.3, 2.5)
-    assert controller.turn_since == 0.5
-    assert receive(controller, 0.3, 6.5) == (0.0, 0.0)
-    assert controller.state == 'FAULT'
+    assert controller.state == 'WAIT_SENSOR'
+    assert receive(controller, 0.3, 12.0) == (0.0, 0.0)
+    assert controller.state == 'BRAKE'
+    assert receive(controller, 0.3, 12.5) == (0.0, 0.50)
+    assert controller.state == 'TURN'
+
+
+@pytest.mark.parametrize('distance,state', [
+    (0.2, 'TOO_CLOSE'), (math.inf, 'WAIT_SENSOR'),
+])
+def test_turn_stops_for_close_or_invalid_sample(distance, state):
+    """删除转向时限不影响超近距离和无效数据的停车保护。"""
+    controller = AvoidanceController()
+    receive(controller, 0.3, 0.0)
+    for i in range(1, 101):
+        receive(controller, 0.3, i / 10)
+    assert controller.state == 'TURN'
+    assert receive(controller, distance, 10.1) == (0.0, 0.0)
+    assert controller.state == state
+
+
+def test_configuration_defaults_and_startup_mapping():
+    """启动参数映射保留已调速度，配置对象不可变。"""
+    config = AvoidanceConfig()
+    assert config.forward_speed == 0.15
+    assert config.turn_speed == 0.50
+    assert len(config._asdict()) == 8
+    assert AvoidanceConfig(**config._asdict()) == config
+    with pytest.raises(AttributeError):
+        config.forward_speed = 0.2
 
 
 @pytest.mark.parametrize('kwargs', [
