@@ -1,0 +1,41 @@
+[4.169s] Invoking command in '/home/mi/A_ws/build/pkg_1016': PYTHONPATH=/home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages:${PYTHONPATH} /usr/bin/python3 setup.py develop --prefix /home/mi/A_ws/install/pkg_1016 --uninstall --editable --build-directory /home/mi/A_ws/build/pkg_1016/build
+[5.840s] running develop
+[5.846s] /usr/local/lib/python3.6/dist-packages/setuptools/command/easy_install.py:159: EasyInstallDeprecationWarning: easy_install command is deprecated. Use build and pip and other standards-based tools.
+[5.848s]   EasyInstallDeprecationWarning,
+[5.853s] /usr/local/lib/python3.6/dist-packages/setuptools/command/install.py:37: SetuptoolsDeprecationWarning: setup.py install is deprecated. Use build and pip and other standards-based tools.
+[5.855s]   setuptools.SetuptoolsDeprecationWarning,
+[6.175s] /usr/local/lib/python3.6/dist-packages/pkg_resources/__init__.py:119: PkgResourcesDeprecationWarning: 0.18ubuntu0.18.04.1 is an invalid version and will not be supported in a future release
+[6.177s]   PkgResourcesDeprecationWarning,
+[6.929s] Invoked command in '/home/mi/A_ws/build/pkg_1016' returned '0': PYTHONPATH=/home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages:${PYTHONPATH} /usr/bin/python3 setup.py develop --prefix /home/mi/A_ws/install/pkg_1016 --uninstall --editable --build-directory /home/mi/A_ws/build/pkg_1016/build
+[6.948s] Invoking command in '/home/mi/A_ws/src/pkg_1016': PYTHONPATH=/home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages:${PYTHONPATH} /usr/bin/python3 setup.py egg_info --egg-base ../../build/pkg_1016 build --build-base /home/mi/A_ws/build/pkg_1016/build install --prefix /home/mi/A_ws/install/pkg_1016 --record /home/mi/A_ws/build/pkg_1016/install.log --single-version-externally-managed
+[8.471s] running egg_info
+[8.475s] writing ../../build/pkg_1016/pkg_1016.egg-info/PKG-INFO
+[8.477s] writing dependency_links to ../../build/pkg_1016/pkg_1016.egg-info/dependency_links.txt
+[8.477s] writing entry points to ../../build/pkg_1016/pkg_1016.egg-info/entry_points.txt
+[8.478s] writing requirements to ../../build/pkg_1016/pkg_1016.egg-info/requires.txt
+[8.478s] writing top-level names to ../../build/pkg_1016/pkg_1016.egg-info/top_level.txt
+[8.497s] reading manifest file '../../build/pkg_1016/pkg_1016.egg-info/SOURCES.txt'
+[8.505s] writing manifest file '../../build/pkg_1016/pkg_1016.egg-info/SOURCES.txt'
+[8.507s] running build
+[8.508s] running build_py
+[8.509s] copying pkg_1016/stand_guard.py -> /home/mi/A_ws/build/pkg_1016/build/lib/pkg_1016
+[8.510s] copying pkg_1016/ultrasonic_avoidance.py -> /home/mi/A_ws/build/pkg_1016/build/lib/pkg_1016
+[8.512s] running install
+[8.513s] /usr/local/lib/python3.6/dist-packages/setuptools/command/install.py:37: SetuptoolsDeprecationWarning: setup.py install is deprecated. Use build and pip and other standards-based tools.
+[8.513s]   setuptools.SetuptoolsDeprecationWarning,
+[8.515s] running install_lib
+[8.519s] copying /home/mi/A_ws/build/pkg_1016/build/lib/pkg_1016/stand_guard.py -> /home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages/pkg_1016
+[8.520s] copying /home/mi/A_ws/build/pkg_1016/build/lib/pkg_1016/ultrasonic_avoidance.py -> /home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages/pkg_1016
+[8.523s] byte-compiling /home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages/pkg_1016/stand_guard.py to stand_guard.cpython-36.pyc
+[8.530s] byte-compiling /home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages/pkg_1016/ultrasonic_avoidance.py to ultrasonic_avoidance.cpython-36.pyc
+[8.542s] running install_data
+[8.545s] running install_egg_info
+[8.552s] removing '/home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages/pkg_1016-0.0.0-py3.6.egg-info' (and everything under it)
+[8.553s] Copying ../../build/pkg_1016/pkg_1016.egg-info to /home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages/pkg_1016-0.0.0-py3.6.egg-info
+[8.560s] running install_scripts
+[8.648s] Installing helloworld script to /home/mi/A_ws/install/pkg_1016/lib/pkg_1016
+[8.650s] Installing lidar_observer script to /home/mi/A_ws/install/pkg_1016/lib/pkg_1016
+[8.652s] Installing move_the_dog script to /home/mi/A_ws/install/pkg_1016/lib/pkg_1016
+[8.653s] Installing ultrasonic_avoidance script to /home/mi/A_ws/install/pkg_1016/lib/pkg_1016
+[8.654s] writing list of installed files to '/home/mi/A_ws/build/pkg_1016/install.log'
+[8.780s] Invoked command in '/home/mi/A_ws/src/pkg_1016' returned '0': PYTHONPATH=/home/mi/A_ws/install/pkg_1016/lib/python3.6/site-packages:${PYTHONPATH} /usr/bin/python3 setup.py egg_info --egg-base ../../build/pkg_1016 build --build-base /home/mi/A_ws/build/pkg_1016/build install --prefix /home/mi/A_ws/install/pkg_1016 --record /home/mi/A_ws/build/pkg_1016/install.log --single-version-externally-managed

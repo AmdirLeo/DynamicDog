@@ -22,4 +22,6 @@ test/test_copyright.py
 test/test_flake8.py
 test/test_lidar_assisted.py
 test/test_pep257.py
+test/test_stand_guard.py
+test/test_stand_node.py
 test/test_topic_logic.py
