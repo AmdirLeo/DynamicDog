@@ -3,12 +3,13 @@
 <package format="3">
   <name>pkg_1030</name>
   <version>0.0.0</version>
-  <description>TODO: Package description</description>
+  <description>ROS 2 service learning package.</description>
   <maintainer email="mi@todo.todo">mi</maintainer>
   <license>TODO: License declaration</license>
 
   <depend>rclpy</depend>
   <depend>example_interfaces</depend>
+  <depend>protocol</depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>

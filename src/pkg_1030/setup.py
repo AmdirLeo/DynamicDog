@@ -15,11 +15,12 @@ setup(
     zip_safe=True,
     maintainer='mi',
     maintainer_email='mi@todo.todo',
-    description='TODO: Package description',
+    description='ROS 2 service learning package.',
     license='TODO: License declaration',
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
+            'service_motion = pkg_1030.service_motion:main',
         ],
     },
 )
