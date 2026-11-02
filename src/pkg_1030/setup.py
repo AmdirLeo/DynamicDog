@@ -23,6 +23,7 @@ setup(
             'service_motion = pkg_1030.service_motion:main',
             'face_enroll = pkg_1030.face_enroll:main',
             'face_recognize_led = pkg_1030.face_recognize_led:main',
+            'camera_capture = pkg_1030.camera_capture:main',
         ],
     },
 )

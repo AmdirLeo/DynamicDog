@@ -1,5 +1,39 @@
-output.md
+# ROS 2 / colcon 生成目录（同时覆盖工作区根目录和误建在 src 下的目录）
+build/
+install/
+log/
 
-交付/
+# Python 字节码、打包产物与虚拟环境
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+.venv/
+venv/
+
+# 测试、覆盖率与静态检查缓存
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# 编辑器与操作系统生成文件
 .vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+/output.md
+/作业1/
+/作业2/
 *.pptx

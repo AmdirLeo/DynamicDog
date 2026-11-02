@@ -1,4 +1,4 @@
-"""订阅超声波与 LaserScan，用 MotionServoCmd 实现低速辅助避障。"""
+"""默认仅用超声波避障；雷达转向辅助与自动站立需显式启用。"""
 
 import json
 import math
@@ -41,7 +41,7 @@ class UltrasonicAvoidance(Node):
             name: startup_parameter(self, name, default)
             for name, default in defaults._asdict().items()
         }
-        self.use_lidar = startup_parameter(self, 'use_lidar', True)
+        self.use_lidar = startup_parameter(self, 'use_lidar', False)
         lidar_defaults = LidarConfig()
         lidar_values = {
             name: startup_parameter(self, name, default)
@@ -233,6 +233,10 @@ class UltrasonicAvoidance(Node):
                         None if scan_age is None else round(scan_age, 3)),
                     'status': ('WAIT_SCAN' if report is None else
                                'STALE' if not fresh else report['status']),
+                    'invalid_reason': (
+                        report['invalid_reason'] if report is not None and fresh else None),
+                    'metadata': (
+                        report['metadata'] if report is not None and fresh else None),
                     'role': 'turn_assistance',
                     'front_used_for_control': False,
                     'turn_direction': (

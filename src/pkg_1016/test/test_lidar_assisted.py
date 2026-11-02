@@ -1,6 +1,7 @@
 """雷达辅助避障测试；扫描数组为合成数据，不冒充实机验证。"""
 
 import math
+import json
 
 import pytest
 
@@ -352,6 +353,84 @@ def test_bad_scan_metadata_is_rejected(kwargs):
                 range_min=0.01, range_max=30.0, config=LidarConfig())
     args.update(kwargs)
     assert control_sectors(**args)['status'] == 'INVALID'
+
+
+@pytest.mark.parametrize('direction', [1, -1])
+@pytest.mark.parametrize('gap_steps', [0, 0.25, 0.9, 1.0])
+def test_driver_endpoint_rounding_preserves_side_geometry(direction, gap_steps):
+    """驱动末端取整不应丢弃整帧，左右仍按原始角度定位。"""
+    step = direction * math.pi / 180
+    values = ranges_for()
+    if direction < 0:
+        values.reverse()
+    angle_min = -direction * math.pi / 2
+    angle_max = angle_min + (len(values) - 1 + gap_steps) * step
+    report = control_sectors(values, angle_min, angle_max, step,
+                            0.01, 30.0, LidarConfig())
+    assert report['status'] == 'OK'
+    assert report['invalid_reason'] is None
+    assert report['metadata']['endpoint_gap_steps'] == pytest.approx(gap_steps)
+    assert report['sectors']['left']['distance_m'] == 1.5
+    assert report['sectors']['right']['distance_m'] == 0.8
+
+
+@pytest.mark.parametrize('direction', [1, -1])
+@pytest.mark.parametrize('gap_steps', [-0.25, -1.0, 1.1, 2.0])
+def test_real_array_mismatch_is_not_hidden_by_rounding_tolerance(direction, gap_steps):
+    """数组越过声明终点或短缺超过一格时，继续拒绝并报告偏差。"""
+    step = direction * math.pi / 180
+    angle_min = -direction * math.pi / 2
+    angle_max = angle_min + (180 + gap_steps) * step
+    report = control_sectors(ranges_for(), angle_min, angle_max, step,
+                            0.01, 30.0, LidarConfig())
+    assert report['status'] == 'INVALID'
+    assert report['invalid_reason'] == 'ANGLE_ENDPOINT_MISMATCH'
+
+
+def test_alternating_493_494_point_scans_can_finish_braking():
+    """模拟浮点取整导致末端差一格；持续近障最终必须右转，而非反复制动。"""
+    controller = LidarAssistedController()
+    minimum = -1.5707963705062866
+    maximum = 1.5707963705062866
+    step = 0.006372398696839809
+    for i in range(11):
+        now = i / 10
+        values = []
+        for index in range(494 if i % 2 == 0 else 493):
+            angle = minimum + index * step
+            values.append(2.45 if angle >= math.pi / 6 else
+                          3.26 if angle < -math.pi / 6 else 0.02)
+        controller.update_range(0.30, 0.1, 1.0, now)
+        controller.update_scan(values, minimum, maximum, step,
+                               0.01, 30.0, 'laser_frame', now)
+        command = controller.command(now)
+        assert controller.scan_report['status'] == 'OK'
+        if i < 5:
+            assert command == (0.0, 0.0)
+            assert controller.state == 'BRAKE'
+        else:
+            assert command == (0.0, -0.5)
+            assert controller.state == 'TURN'
+
+
+@pytest.mark.parametrize('overrides,reason', [
+    ({'angle_min': math.nan}, 'NONFINITE_METADATA'),
+    ({'angle_increment': 0}, 'ZERO_ANGLE_INCREMENT'),
+    ({'range_min': 40}, 'INVALID_RANGE_LIMITS'),
+    ({'ranges': []}, 'TOO_FEW_POINTS'),
+    ({'angle_max': 10}, 'ANGLE_SPAN_OUT_OF_RANGE'),
+    ({'angle_max': -2}, 'ANGLE_DIRECTION_MISMATCH'),
+])
+def test_invalid_metadata_has_json_safe_diagnostics(overrides, reason):
+    """异常元数据提供具体原因，NaN 等值也不能破坏状态输出。"""
+    args = dict(ranges=ranges_for(), angle_min=-math.pi / 2,
+                angle_max=math.pi / 2, angle_increment=math.pi / 180,
+                range_min=0.01, range_max=30.0, config=LidarConfig())
+    args.update(overrides)
+    report = control_sectors(**args)
+    assert report['status'] == 'INVALID'
+    assert report['invalid_reason'] == reason
+    json.dumps(report, allow_nan=False)
 
 
 @pytest.mark.parametrize('kwargs', [

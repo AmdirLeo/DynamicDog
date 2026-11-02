@@ -57,16 +57,51 @@ def control_sectors(ranges, angle_min, angle_max, angle_increment,
                'coverage': 0.0, 'valid_fraction': 0.0, 'known': False}
         for name in ('front', 'left', 'right')
     }
-    report = {'status': 'INVALID', 'sectors': sectors}
-    if (not all(math.isfinite(v) for v in (
-            angle_min, angle_max, angle_increment, range_min, range_max))
-            or angle_increment == 0 or not 0 <= range_min < range_max
-            or len(ranges) < 2):
+    metadata = {
+        'points': len(ranges),
+        'angle_min': angle_min, 'angle_max': angle_max,
+        'angle_increment': angle_increment,
+        'range_min': range_min, 'range_max': range_max,
+        'endpoint_gap_steps': None,
+    }
+    # 诊断也必须能用 allow_nan=False 序列化，不能因异常元数据崩溃。
+    metadata = {key: value if value is None or math.isfinite(value) else None
+                for key, value in metadata.items()}
+    report = {'status': 'INVALID', 'invalid_reason': None,
+              'metadata': metadata, 'sectors': sectors}
+    if not all(math.isfinite(v) for v in (
+            angle_min, angle_max, angle_increment, range_min, range_max)):
+        report['invalid_reason'] = 'NONFINITE_METADATA'
+        return report
+    if angle_increment == 0:
+        report['invalid_reason'] = 'ZERO_ANGLE_INCREMENT'
+        return report
+    if not 0 <= range_min < range_max:
+        report['invalid_reason'] = 'INVALID_RANGE_LIMITS'
+        return report
+    if len(ranges) < 2:
+        report['invalid_reason'] = 'TOO_FEW_POINTS'
         return report
     span = (len(ranges) - 1) * angle_increment
-    if (not math.isfinite(span) or abs(span) > 2 * math.pi + 1e-5
-            or abs(angle_min + span - angle_max)
-            > max(1e-5, abs(angle_increment) * 0.1)):
+    declared_span = angle_max - angle_min
+    if (not math.isfinite(span) or not math.isfinite(declared_span)
+            or abs(span) > 2 * math.pi + 1e-5
+            or abs(declared_span) > 2 * math.pi + 1e-5):
+        report['invalid_reason'] = 'ANGLE_SPAN_OUT_OF_RANGE'
+        return report
+    if (declared_span == 0
+            or (declared_span > 0) != (angle_increment > 0)):
+        report['invalid_reason'] = 'ANGLE_DIRECTION_MISMATCH'
+        return report
+    gap = (declared_span - span) * (1 if angle_increment > 0 else -1)
+    gap_steps = gap / abs(angle_increment)
+    metadata['endpoint_gap_steps'] = gap_steps if math.isfinite(gap_steps) else None
+    # 官方 ydlidar_plugin 用 int(span / increment + 1) 分配 ranges：
+    # 最后一个点可比声明终点少不到一格。允许这一取整差及 float32 误差，
+    # 不允许数组明显越过终点或缺失多格；仍按原始 min + i * increment 定位。
+    tolerance = max(1e-5, abs(angle_increment) * 1e-3)
+    if gap < -tolerance or gap > abs(angle_increment) + tolerance:
+        report['invalid_reason'] = 'ANGLE_ENDPOINT_MISMATCH'
         return report
     for i, distance in enumerate(ranges):
         angle = (angle_min % (2 * math.pi) + i * angle_increment
@@ -139,6 +174,7 @@ class LidarAssistedController(AvoidanceController):
             range_min, range_max, config)
         if frame_id != config.scan_frame_id:
             self.scan_report['status'] = 'FRAME_MISMATCH'
+            self.scan_report['invalid_reason'] = 'FRAME_MISMATCH'
         sectors = self.scan_report['sectors']
         near = any(s['distance_m'] is not None
                    and s['distance_m'] <= self.config.emergency_distance
@@ -187,7 +223,8 @@ class LidarAssistedController(AvoidanceController):
             return self._stop('WAIT_SCAN', now, '需要转向，但雷达未接收或超时')
         if self.scan_report['status'] != 'OK':
             return self._stop(
-                'WAIT_SCAN', now, '需要转向，但雷达异常：' + self.scan_report['status'])
+                'WAIT_SCAN', now, '需要转向，但雷达异常：{} ({})'.format(
+                    self.scan_report['status'], self.scan_report['invalid_reason']))
         sectors = self.scan_report['sectors']
         if any(s['distance_m'] is not None
                and s['distance_m'] <= c.emergency_distance

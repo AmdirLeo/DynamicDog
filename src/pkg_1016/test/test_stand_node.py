@@ -102,9 +102,11 @@ def node_factory(monkeypatch):
     clock = [0.0]
     module.time = SimpleNamespace(monotonic=lambda: clock[0], sleep=lambda seconds: None)
 
-    def make(enable_motion=True, auto_stand=True, use_lidar=False):
-        params.update(enable_motion=enable_motion, auto_stand=auto_stand,
-                      use_lidar=use_lidar)
+    def make(enable_motion=True, auto_stand=True, use_lidar=None):
+        params.clear()
+        params.update(enable_motion=enable_motion, auto_stand=auto_stand)
+        if use_lidar is not None:
+            params['use_lidar'] = use_lidar
         return module.UltrasonicAvoidance(), clock
 
     return make
@@ -201,6 +203,8 @@ def test_stop_during_standing_does_not_send_gait(node_factory):
 def test_disabled_feature_preserves_original_start_and_stop(node_factory):
     """不启用时保持原来的手动站立运行方式与正常结束帧。"""
     node, clock = node_factory(auto_stand=False)
+    assert not node.use_lidar
+    assert 'scan' not in node.subscriptions
     for now in (0.0, 0.1, 0.2):
         tick(node, clock, now)
     assert node.clients == {}
