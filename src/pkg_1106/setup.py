@@ -20,6 +20,7 @@ setup(
     entry_points={
         'console_scripts': [
             'camera_rgb = pkg_1106.camera_rgb:main',
+            'camera_hsv = pkg_1106.camera_hsv:main',
         ],
     },
 )
