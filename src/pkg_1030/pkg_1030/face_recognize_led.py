@@ -1,4 +1,4 @@
-"""通过服务启动人脸识别，匹配成功话题后亮绿灯三秒。"""
+"""通过服务启动人脸识别，匹配成功后头部灯带和 Mini LED 亮绿灯三秒。"""
 
 import time
 import uuid
@@ -27,7 +27,7 @@ class FaceRecognizeLed(DemoNode):
         self.result = None
         self.listening = False
         self.recognition_pending = False
-        self.led_pending = False
+        self.led_pending = set()
         self.subscription = self.create_subscription(
             FaceRecognitionResult, self.endpoint('face_rec_msg'),
             self.on_result, 10)
@@ -41,8 +41,8 @@ class FaceRecognizeLed(DemoNode):
         request.timeout = self.timeout
         return request
 
-    def led_request(self, occupation):
-        """使用官方 VP 客户端优先级，控制头灯并支持归还控制权。"""
+    def led_request(self, occupation, target):
+        """按灯组选择适用的绿色灯效，并支持归还控制权。"""
         request = LedExecute.Request()
         if not hasattr(request, 'occupation'):
             raise RuntimeError(
@@ -50,9 +50,9 @@ class FaceRecognizeLed(DemoNode):
                 '请先用 ros2 interface show protocol/srv/LedExecute 核对版本。')
         request.occupation = occupation
         request.client = 'vp'
-        request.target = 1       # HEAD_LED：头灯。
+        request.target = target  # 1：头部 RGB 灯带；3：Mini LED。
         request.mode = 2         # USER_DEFINED：自定义 RGB。
-        request.effect = 1       # RGB_ON：常亮。
+        request.effect = 49 if target == 3 else 1  # Mini 画圆环；RGB 常亮。
         request.r_value = 0
         request.g_value = 255
         request.b_value = 0
@@ -73,7 +73,7 @@ class FaceRecognizeLed(DemoNode):
 
     def run(self):
         """先完成识别，再亮灯，最后归还控制权。"""
-        light_on = self.led_request(True)
+        lights_on = [self.led_request(True, target) for target in (1, 3)]
         self.wait_service(self.face_client)
         self.wait_service(self.led_client)
         self.get_logger().info('请正对摄像头；正在启动人脸识别…')
@@ -92,24 +92,35 @@ class FaceRecognizeLed(DemoNode):
         self.recognition_pending = False
         self.get_logger().info(f'识别成功：{self.result.username}')
 
-        self.led_pending = True  # 超时也可能已亮灯，退出时仍尝试释放。
-        response = self.call(self.led_client, light_on)
-        if response.code != 0:
-            raise RuntimeError(f'绿灯未确认点亮，code={response.code}')
-        self.get_logger().info(f'绿灯已亮，保持 {self.led_seconds:g} 秒。')
+        for request in lights_on:
+            # 超时也可能已亮灯，退出时仍尝试释放每个已请求的灯组。
+            self.led_pending.add(request.target)
+            response = self.call(self.led_client, request)
+            if response.code != 0:
+                raise RuntimeError(
+                    f'绿灯未确认点亮，target={request.target}，code={response.code}')
+            self.get_logger().info(f'绿色灯效已执行，target={request.target}。')
+        self.get_logger().info(f'两组绿色灯效保持 {self.led_seconds:g} 秒。')
         until = time.monotonic() + self.led_seconds
         self.wait_until(lambda: time.monotonic() >= until, self.led_seconds + 1)
         self.release_led()
 
     def release_led(self):
-        """释放 VP 对头灯的占用，恢复由系统优先级队列决定的灯效。"""
-        if not self.led_pending:
-            return
-        response = self.call(self.led_client, self.led_request(False), cleanup=True)
-        if response.code != 0:
-            raise RuntimeError(f'释放头灯失败，code={response.code}')
-        self.led_pending = False
-        self.get_logger().info('已归还头灯控制权。')
+        """逐组释放占用，单组失败时仍尝试归还其他灯组的控制权。"""
+        errors = []
+        for target in sorted(self.led_pending):
+            try:
+                response = self.call(
+                    self.led_client, self.led_request(False, target), cleanup=True)
+                if response.code != 0:
+                    raise RuntimeError(f'code={response.code}')
+            except Exception as exc:
+                errors.append(f'target={target}：{exc}')
+            else:
+                self.led_pending.remove(target)
+                self.get_logger().info(f'已归还灯光控制权，target={target}。')
+        if errors:
+            raise RuntimeError('释放灯光未确认成功，' + '；'.join(errors))
 
     def cleanup(self):
         """中断或失败时释放灯光；识别请求由服务端到期自动清理。"""
