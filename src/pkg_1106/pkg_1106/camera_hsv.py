@@ -62,9 +62,9 @@ class CameraHSV(Node):
 
     def update_gui(self):
         """读取阈值并刷新掩码；按 s 将当前阈值输出到终端。"""
-        if cv2.getWindowProperty('Trackbars', cv2.WND_PROP_VISIBLE) < 1:
-            self.exit_requested = True
-            return
+        # 不用 WND_PROP_VISIBLE 判断退出：窗口尚未显示或后端不支持时，
+        # 它可能返回 0 / -1，导致首次 waitKey 处理事件之前就退出。
+        # 通过 q、Esc 或终端 Ctrl+C 显式退出。
         lower = tuple(
             cv2.getTrackbarPos(channel + ' min', 'Trackbars')
             for channel in ('H', 'S', 'V'))
