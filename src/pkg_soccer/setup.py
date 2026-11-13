@@ -1,0 +1,20 @@
+from setuptools import setup
+
+package_name = 'pkg_soccer'
+
+setup(
+    name=package_name,
+    version='0.1.0',
+    packages=[package_name],
+    data_files=[
+        ('share/ament_index/resource_index/packages', ['resource/' + package_name]),
+        ('share/' + package_name, ['package.xml']),
+    ],
+    install_requires=['setuptools'],
+    zip_safe=True,
+    maintainer='mi',
+    maintainer_email='mi@todo.todo',
+    description='Closed-loop CyberDog soccer agent using VRPN motion capture.',
+    license='Apache-2.0',
+    entry_points={'console_scripts': ['soccer = pkg_soccer.soccer:main']},
+)

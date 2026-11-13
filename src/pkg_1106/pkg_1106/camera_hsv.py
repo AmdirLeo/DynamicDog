@@ -34,11 +34,16 @@ class CameraHSV(Node):
 
         cv2.namedWindow('Trackbars', cv2.WINDOW_NORMAL)
         cv2.resizeWindow('Trackbars', 480, 300)
-        for channel, maximum in (('H', 179), ('S', 255), ('V', 255)):
+        # 绿球标定起始值；实际阈值仍需根据现场光照用滑动条调整。
+        for channel, minimum, upper, maximum in (
+                ('H', 35, 85, 179),
+                ('S', 80, 255, 255),
+                ('V', 50, 255, 255)):
             cv2.createTrackbar(
-                channel + ' min', 'Trackbars', 0, maximum, lambda value: None)
+                channel + ' min', 'Trackbars', minimum, maximum,
+                lambda value: None)
             cv2.createTrackbar(
-                channel + ' max', 'Trackbars', maximum, maximum,
+                channel + ' max', 'Trackbars', upper, maximum,
                 lambda value: None)
         for window in ('Original', 'Mask', 'Result'):
             cv2.namedWindow(window, cv2.WINDOW_NORMAL)
