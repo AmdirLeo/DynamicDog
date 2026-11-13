@@ -64,11 +64,9 @@ class Soccer(Node):
         self.world_frame = self.param('world_frame', '')
         self.position_scale = float(self.param('position_scale', 1.0))
         self.yaw_offset = float(self.param('dog_yaw_offset', 0.0))
+        self.dog_quaternion = None
         self.posture_timeout = float(self.param('posture_timeout', 1.0))
-        self.auto_stand = self.param('auto_stand', True)
         self.stand_timeout = float(self.param('stand_timeout', 25.0))
-        if type(self.auto_stand) is not bool:
-            raise ValueError('auto_stand 必须为 true/false')
         self.stand_guard = StandGuard(303, self.posture_timeout, self.stand_timeout)
         self.stand_client = None
         self.stand_future = None
@@ -167,11 +165,10 @@ class Soccer(Node):
             self.pub = self.create_publisher(MotionServoCmd, self.endpoint('motion_servo_cmd'), 1)
             self.status_sub = self.create_subscription(
                 MotionStatus, self.endpoint('motion_status'), self.on_status, self.qos)
-            if self.auto_stand:
-                from protocol.srv import MotionResultCmd
-                self.stand_service_type = MotionResultCmd
-                self.stand_client = self.create_client(
-                    MotionResultCmd, self.endpoint('motion_result_cmd'))
+            from protocol.srv import MotionResultCmd
+            self.stand_service_type = MotionResultCmd
+            self.stand_client = self.create_client(
+                MotionResultCmd, self.endpoint('motion_result_cmd'))
         self.timer = self.create_timer(
             0.05, self.on_timer, clock=Clock(clock_type=ClockType.STEADY_TIME))
         self.get_logger().info(
@@ -184,7 +181,7 @@ class Soccer(Node):
                 '稳定采样后输出 offset 并退出。')
         elif self.enable_motion:
             self.get_logger().info(
-                f'当前为运动模式：auto_stand={self.auto_stand}；'
+                '当前为运动模式：启动时自动站立已内置；'
                 '等待正常 motion_status，站稳后才允许踢球。')
         else:
             self.get_logger().info(
@@ -192,6 +189,10 @@ class Soccer(Node):
                 '已有偏移会应用于门中心定位；确认后以 enable_motion:=true 重启。')
         if self.use_mocap_goals:
             self.get_logger().info(f'采用球门偏移（米）：{self.goal_offsets}')
+        self.get_logger().info(
+            f'速度上限：行走={self.controller.cfg.approach_speed:.2f}m/s，'
+            f'触球={self.controller.cfg.kick_speed:.2f}m/s；'
+            f'狗朝向修正 dog_yaw_offset={self.yaw_offset:.3f}rad')
 
     def param(self, name, default):
         """启动参数只读，避免运行时变更却未实际应用。"""
@@ -223,6 +224,8 @@ class Soccer(Node):
                 raise ValueError('动捕位置包含无效数值')
             yaw = (wrap_angle(yaw_from_quaternion(q.x, q.y, q.z, q.w) + self.yaw_offset)
                    if kind == 'dog' else 0.0)
+            if kind == 'dog':
+                self.dog_quaternion = (q.x, q.y, q.z, q.w)
             stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
             self.controller.update(kind, p.x*self.position_scale, p.y*self.position_scale,
                                    yaw, now, frame, stamp)
@@ -431,9 +434,7 @@ class Soccer(Node):
                 guard.fail(f'站立服务异常：{exc}')
         action = guard.command(now)
         if action == 'REQUEST':
-            if not self.auto_stand:
-                guard.reason = 'auto_stand=false，请手动站稳'
-            elif not self.stand_client.service_is_ready():
+            if not self.stand_client.service_is_ready():
                 guard.reason = '等待站立服务：' + self.endpoint('motion_result_cmd')
             else:
                 guard.requested(now)
@@ -481,10 +482,17 @@ class Soccer(Node):
             d, b = self.controller.dog, self.controller.ball
             positions = (f'dog=({d.x:.2f},{d.y:.2f},{d.yaw:.2f}rad) '
                          f'ball=({b.x:.2f},{b.y:.2f})' if d and b else '等待定位')
+            target = self.controller.target_yaw
+            heading = (f'；目标朝向={target:.2f}rad，'
+                       f'偏差={math.degrees(wrap_angle(target-d.yaw)):.1f}度'
+                       if d is not None and target is not None else '')
+            orientation = (f'；dog原始四元数(x,y,z,w)='
+                           f'{tuple(round(v, 4) for v in self.dog_quaternion)}'
+                           if self.dog_quaternion is not None else '')
             self.get_logger().info(
                 f'{state}: {reason}；{positions}；射门 {self.controller.kicks}/'
                 f'{self.controller.cfg.max_kicks}；速度=({velocity[0]:.2f},'
-                f'{velocity[1]:.2f},{velocity[2]:.2f})')
+                f'{velocity[1]:.2f},{velocity[2]:.2f}){heading}{orientation}')
             self.last_state, self.last_report = state, now
 
     def pose_wait_reason(self, now):

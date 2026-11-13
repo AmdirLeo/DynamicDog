@@ -33,15 +33,15 @@ class Config(NamedTuple):
     ball_radius: float = 0.12
     pose_timeout: float = 0.5
     sync_tolerance: float = 0.15
-    approach_speed: float = 0.12
-    turn_speed: float = 0.4
-    angle_tolerance: float = 0.10
+    approach_speed: float = 0.25
+    turn_speed: float = 0.5
+    angle_tolerance: float = 0.15
     behind_distance: float = 0.70
     ball_clearance: float = 0.48
     position_tolerance: float = 0.07
     kick_distance: float = 0.38  # 球心到狗刚体原点，需现场标定。
     min_distance: float = 0.20
-    kick_speed: float = 0.25
+    kick_speed: float = 0.30
     kick_duration: float = 0.8
     kick_travel: float = 0.20
     ball_move_distance: float = 0.15
@@ -131,6 +131,12 @@ class Controller:
         self.sequence = 0
         self.route_side = None
         self.scored = False
+        self.target_yaw = None
+        self.turn_started = None
+        self.turn_checkpoint = None
+        self.turn_checkpoint_yaw = None
+        self.turn_sign = None
+        self.turn_origin = None
 
     @property
     def finished(self):
@@ -200,7 +206,7 @@ class Controller:
         setattr(self, kind, pose)
 
     def poses_valid(self, now):
-        """同坐标系、接收新鲜度和两个源时间戳必须同时成立。"""
+        """要求同一坐标系且各自接收新鲜，不要求回调同时发生。"""
         d, b, c = self.dog, self.ball, self.cfg
         return (d is not None and b is not None and bool(d.frame) and
                 d.frame == b.frame and
@@ -216,20 +222,79 @@ class Controller:
         return c.field_min_x <= fx <= c.field_max_x and c.field_min_y <= fy <= c.field_max_y
 
     def drive_to(self, x, y, yaw, speed):
-        """世界速度转到机身坐标；利用 303 步态横移保持面向球门。"""
+        """近球时世界速度转机身速度，减速对准；偏航容差内不再转动。"""
         d, c = self.dog, self.cfg
         dx, dy = x - d.x, y - d.y
         distance = math.hypot(dx, dy)
-        scale = min(1.0, speed / max(distance, 1e-9))
+        scale = min(speed, max(0.04, 1.5*distance)) / max(distance, 1e-9)
         wx, wy = dx*scale, dy*scale
         vx = math.cos(d.yaw)*wx + math.sin(d.yaw)*wy
         vy = -math.sin(d.yaw)*wx + math.cos(d.yaw)*wy
-        wz = max(-c.turn_speed, min(c.turn_speed, 1.5*wrap_angle(yaw - d.yaw)))
+        wz = self.turn_rate(yaw)
         # 预测短时间运动仍须在场内；边界不足时保持停止而不是穿越边界。
         if not self.inside_field(d.x + wx*0.5, d.y + wy*0.5):
             self.stop('绕球路径接近场地边界，请调整场地范围或球的位置')
             return self.ZERO
         return vx, vy, wz
+
+    def turn_rate(self, target_yaw):
+        """使用最短角误差；容差内停止，容差外避免指令小到无法转动。"""
+        self.target_yaw = target_yaw
+        error = wrap_angle(target_yaw - self.dog.yaw)
+        if abs(error) <= self.cfg.angle_tolerance:
+            return 0.0
+        rate = min(self.cfg.turn_speed, max(0.20, 1.5*abs(error)))
+        return math.copysign(rate, error)
+
+    def navigate_to(self, x, y):
+        """绕球阶段先朝向路径点再前进，避免一边横移一边强行朝向球门。"""
+        dx, dy = x - self.dog.x, y - self.dog.y
+        heading = math.atan2(dy, dx)
+        error = wrap_angle(heading - self.dog.yaw)
+        wz = self.turn_rate(heading)
+        if abs(error) > 0.45:
+            return 0.0, 0.0, wz
+        # 将导航速度限制在机身正前方，横移仅用于接近球时的小幅修正。
+        vx = min(self.cfg.approach_speed, max(0.04, 1.5*math.hypot(dx, dy)))
+        vx *= max(0.0, math.cos(error))
+        if not self.inside_field(self.dog.x + vx*math.cos(self.dog.yaw)*0.5,
+                                 self.dog.y + vx*math.sin(self.dog.yaw)*0.5):
+            self.stop('前进路径接近场地边界')
+            return self.ZERO
+        return vx, 0.0, wz
+
+    def command(self, now):
+        """检查所有转向指令的反馈，反向/无进展时结束控制。"""
+        velocity = self._command(now)
+        vx, vy, wz = velocity
+        if self.finished or abs(wz) < 1e-6:
+            self.turn_started = None
+            return velocity
+        direction = math.copysign(1.0, wz)
+        if self.turn_started is None:
+            self.turn_started = self.turn_checkpoint = now
+            self.turn_checkpoint_yaw = self.dog.yaw
+            self.turn_sign = direction
+            self.turn_origin = (self.dog.x, self.dog.y)
+        elif direction != self.turn_sign:
+            self.turn_checkpoint = now
+            self.turn_checkpoint_yaw = self.dog.yaw
+            self.turn_sign = direction
+        if math.hypot(self.dog.x-self.turn_origin[0],
+                      self.dog.y-self.turn_origin[1]) >= 0.15:
+            self.turn_started = now
+            self.turn_origin = (self.dog.x, self.dog.y)
+        delta = wrap_angle(self.dog.yaw - self.turn_checkpoint_yaw)*direction
+        if now - self.turn_checkpoint >= 0.4 and delta < -0.10:
+            self.stop('转向反馈与指令相反：检查 Z-up、刚体姿态轴和转向接口')
+        elif delta >= 0.04:
+            self.turn_checkpoint = now
+            self.turn_checkpoint_yaw = self.dog.yaw
+        elif now - self.turn_checkpoint >= 3.0:
+            self.stop('转向 3 秒但动捕偏航无进展：检查狗刚体姿态是否更新')
+        if now - self.turn_started >= 12.0:
+            self.stop('连续原地转向超过 12 秒：检查狗刚体朝向与 dog_yaw_offset')
+        return self.ZERO if self.finished else velocity
 
     def route_target(self, target_x, target_y):
         """直线会穿过球周围的保留空间时，沿固定一侧绕行。"""
@@ -257,7 +322,7 @@ class Controller:
         return (b.x + route_radius*math.cos(waypoint_angle),
                 b.y + route_radius*math.sin(waypoint_angle))
 
-    def command(self, now):
+    def _command(self, now):
         """闭环决策，每周期返回 (前进, 横移, 转向)，无需阻塞等待。"""
         c = self.cfg
         if self.finished:
@@ -337,7 +402,7 @@ class Controller:
             self.reason = '绕到球后方，建立朝向球门的射门路线'
             if math.hypot(stage_x - d.x, stage_y - d.y) > c.position_tolerance:
                 target = self.route_target(stage_x, stage_y)
-                return self.drive_to(*target, shot_yaw, c.approach_speed)
+                return self.navigate_to(*target)
             self.state = 'ALIGN'
         if forward <= 0 or abs(lateral) > c.position_tolerance*1.5:
             self.state, self.reason = 'POSITION', '球偏离射门轴，重新绕球'
@@ -346,7 +411,7 @@ class Controller:
         if abs(heading_error) > c.angle_tolerance:
             self.state, self.reason = 'ALIGN', '调整机身朝向球门'
             self.settle_at = None
-            return 0.0, 0.0, max(-c.turn_speed, min(c.turn_speed, 1.5*heading_error))
+            return 0.0, 0.0, self.turn_rate(shot_yaw)
         if self.distance < c.min_distance:
             self.state, self.reason = 'POSITION', '与球过近，退出并重新组织'
             self.settle_at = None
