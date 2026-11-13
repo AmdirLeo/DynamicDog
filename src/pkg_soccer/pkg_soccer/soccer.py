@@ -57,7 +57,9 @@ class Soccer(Node):
         self.dog_name = self.param('dog_name', 'mi_desktop_48_b0_2d_7b_03_fd').strip('/')
         self.dog_topic = self.param('dog_pose_topic', '/vrpn/xll_dog/pose')
         self.ball_topic = self.param('ball_pose_topic', '/vrpn/ball/pose')
-        self.world_frame = self.param('world_frame', 'world')
+        # 为空时接受 VRPN 实际发布的 frame_id，并要求所有刚体一致。
+        # 需要强制检查时可显式传入 -p world_frame:=world。
+        self.world_frame = self.param('world_frame', '')
         self.position_scale = float(self.param('position_scale', 1.0))
         self.yaw_offset = float(self.param('dog_yaw_offset', 0.0))
         self.posture_timeout = float(self.param('posture_timeout', 1.0))
@@ -66,6 +68,7 @@ class Soccer(Node):
         self.calibrate_goal = self.param('calibrate_goal', '')
         self.field_width = float(self.param('field_width', 3.0))
         self.field_end_margin = float(self.param('field_end_margin', 0.6))
+        self.goal_pose_timeout = float(self.param('goal_pose_timeout', 2.0))
         self.calibration_pose_timeout = float(
             self.param('calibration_pose_timeout', 2.0))
         self.calibration_window = float(
@@ -80,6 +83,8 @@ class Soccer(Node):
         if not (math.isfinite(self.field_width) and self.field_width > values['goal_width'] and
                 math.isfinite(self.field_end_margin) and self.field_end_margin > 0):
             raise ValueError('field_width 必须大于 goal_width，field_end_margin 必须为正数')
+        if not math.isfinite(self.goal_pose_timeout) or self.goal_pose_timeout <= 0:
+            raise ValueError('goal_pose_timeout 必须为有限正数')
         if (not math.isfinite(self.calibration_pose_timeout) or
                 not math.isfinite(self.calibration_window) or
                 self.calibration_pose_timeout <= 0 or self.calibration_window <
@@ -93,17 +98,19 @@ class Soccer(Node):
         self.goal_pair = (0, 0)
         self.goal_reference = None
         self.goal_note = '等待两个球门的动捕位姿'
+        self.detected_frame = self.world_frame or None
         self.goal_raw = {}
         self.calibration_values = []
         self.calibration_pair = (0, 0)
         self.calibration_complete = False
         self.calibration_reported = False
-        if (not self.world_frame or not self.dog_topic or not self.ball_topic or
+        if (not self.dog_topic or not self.ball_topic or
                 self.dog_topic == self.ball_topic):
-            raise ValueError('坐标系/话题不能为空，狗和球的话题必须不同')
+            raise ValueError('话题不能为空，狗和球的话题必须不同')
         if not all(math.isfinite(v) for v in
-                   (self.position_scale, self.yaw_offset, self.posture_timeout)):
-            raise ValueError('位置比例、偏航修正和姿态超时必须有限')
+                   (self.position_scale, self.yaw_offset, self.posture_timeout,
+                    self.goal_pose_timeout)):
+            raise ValueError('位置比例、偏航和姿态超时必须有限')
         if self.position_scale <= 0 or self.posture_timeout <= 0:
             raise ValueError('position_scale 和 posture_timeout 必须为正数')
         self.status_at = None
@@ -157,13 +164,22 @@ class Soccer(Node):
         """兼容有/无机器狗命名空间的运动接口。"""
         return f'/{self.dog_name}/{name}' if self.dog_name else f'/{name}'
 
+    def message_frame(self, msg):
+        """接纳 VRPN 的实际 frame_id；空 frame 统一为本节点内部名称。"""
+        frame = (msg.header.frame_id or '').strip() or '__vrpn_default_frame__'
+        if self.world_frame and frame != self.world_frame:
+            raise ValueError(f'frame={frame!r}，期望 {self.world_frame!r}')
+        if self.detected_frame is None:
+            self.detected_frame = frame
+        elif frame != self.detected_frame:
+            raise ValueError(f'刚体坐标系不一致：收到 {frame!r}，已有 {self.detected_frame!r}')
+        return frame
+
     def on_pose(self, kind, msg):
         """校验坐标系和有限位置；狗偏航按课件四元数公式得到。"""
         now = time.monotonic()
         try:
-            if msg.header.frame_id != self.world_frame:
-                raise ValueError(f'{kind} frame={msg.header.frame_id!r}，'
-                                 f'期望 {self.world_frame!r}')
+            frame = self.message_frame(msg)
             p, q = msg.pose.position, msg.pose.orientation
             if not all(math.isfinite(v) for v in (p.x, p.y, p.z)):
                 raise ValueError('动捕位置包含无效数值')
@@ -171,7 +187,7 @@ class Soccer(Node):
                    if kind == 'dog' else 0.0)
             stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
             self.controller.update(kind, p.x*self.position_scale, p.y*self.position_scale,
-                                   yaw, now, msg.header.frame_id, stamp)
+                                   yaw, now, frame, stamp)
         except (ValueError, TypeError, AttributeError) as exc:
             setattr(self.controller, kind, None)
             self.goal_note = str(exc)
@@ -184,8 +200,7 @@ class Soccer(Node):
         """保存球门刚体原点，同时应用正式运行时的门中心偏移。"""
         now = time.monotonic()
         try:
-            if msg.header.frame_id != self.world_frame:
-                raise ValueError(name + ' 坐标系与 world_frame 不符')
+            frame = self.message_frame(msg)
             p, q = msg.pose.position, msg.pose.orientation
             yaw = yaw_from_quaternion(q.x, q.y, q.z, q.w)
             raw_x = p.x*self.position_scale
@@ -207,8 +222,8 @@ class Soccer(Node):
                     return
             self.goal_sequence += 1
             self.goal_raw[name] = Pose(raw_x, raw_y, yaw, now,
-                                       self.world_frame, stamp, self.goal_sequence)
-            self.goals[name] = Pose(x, y, yaw, now, self.world_frame, stamp,
+                                       frame, stamp, self.goal_sequence)
+            self.goals[name] = Pose(x, y, yaw, now, frame, stamp,
                                     self.goal_sequence)
         except (AttributeError, TypeError, ValueError) as exc:
             self.goals.pop(name, None)
@@ -242,10 +257,8 @@ class Soccer(Node):
             self.goal_note = f'坐标系不一致：门={goal.frame!r}，球={ball.frame!r}'
             self.calibration_values.clear()
             return True
-        if abs(goal.received - ball.received) > self.controller.cfg.sync_tolerance:
-            self.goal_note = '门和球的接收时间不同步'
-            self.calibration_values.clear()
-            return True
+        # 标定对象是静止的门和球，不要求两个回调在同一时刻到达；
+        # 只要各自没有超过 calibration_pose_timeout，就可放入滑动窗口。
         dx, dy = ball.x - goal.x, ball.y - goal.y
         ox = dx*math.cos(goal.yaw) + dy*math.sin(goal.yaw)
         oy = -dx*math.sin(goal.yaw) + dy*math.cos(goal.yaw)
@@ -283,15 +296,24 @@ class Soccer(Node):
         left, right = self.goals.get('goal_left'), self.goals.get('goal_right')
         if left is None or right is None:
             self.goal_confirm = 0
+            missing = []
+            if left is None:
+                missing.append('goal_left')
+            if right is None:
+                missing.append('goal_right')
+            self.goal_note = '未收到：' + ', '.join(missing)
             return False
         poses = (left, right)
-        if (any(not 0 <= now - p.received <= c.cfg.pose_timeout for p in poses) or
-                abs(left.received - right.received) > c.cfg.sync_tolerance or
-                not ((left.stamp == right.stamp == 0) or
-                     (left.stamp > 0 and right.stamp > 0 and
-                      abs(left.stamp - right.stamp) <= c.cfg.sync_tolerance))):
+        if any(not 0 <= now - p.received <= self.goal_pose_timeout for p in poses):
             self.goal_confirm = 0
-            self.goal_note = '球门动捕断流或不同步'
+            ages = ', '.join(f'{name}={now - pose.received:.2f}s'
+                             for name, pose in zip(('left', 'right'), poses))
+            self.goal_note = (f'球门数据过期（{ages}，允许 '
+                              f'{self.goal_pose_timeout:.1f}s）')
+            return False
+        if left.frame != right.frame:
+            self.goal_confirm = 0
+            self.goal_note = f'两门坐标系不一致：{left.frame!r} / {right.frame!r}'
             return False
         pair = (left.sequence, right.sequence)
         if pair[0] != self.goal_pair[0] and pair[1] != self.goal_pair[1]:
@@ -389,6 +411,22 @@ class Soccer(Node):
                 f'{velocity[1]:.2f},{velocity[2]:.2f})')
             self.last_state, self.last_report = state, now
 
+    def pose_wait_reason(self, now):
+        """把定位等待拆成可操作的原因，避免笼统显示“断流/不同步”。"""
+        d, b = self.controller.dog, self.controller.ball
+        if d is None:
+            return '未收到 dog 位姿'
+        if b is None:
+            return '未收到 ball 位姿'
+        if d.frame != b.frame:
+            return f'dog/ball 坐标系不同：{d.frame!r}/{b.frame!r}'
+        ages = f'dog={now-d.received:.2f}s, ball={now-b.received:.2f}s'
+        if now - d.received > self.controller.cfg.pose_timeout:
+            return f'dog 位姿过期（{ages}）'
+        if now - b.received > self.controller.cfg.pose_timeout:
+            return f'ball 位姿过期（{ages}）'
+        return f'位姿已收到但尚未满足控制条件（{ages}）'
+
     def on_timer(self):
         """先通过姿态门控，再计算本周期指令，停止时发送 SERVO_END。"""
         now = time.monotonic()
@@ -432,7 +470,7 @@ class Soccer(Node):
                           f'射门方向={yaw:.2f}rad（仅观察）')
                 self.report(now, 'OBSERVE', reason, Controller.ZERO)
             else:
-                self.report(now, 'WAIT_POSE', '等待同步动捕，检查话题/坐标系', Controller.ZERO)
+                self.report(now, 'WAIT_POSE', self.pose_wait_reason(now), Controller.ZERO)
             return
         velocity = c.command(now)
         if c.finished or c.state == 'WAIT_POSE':

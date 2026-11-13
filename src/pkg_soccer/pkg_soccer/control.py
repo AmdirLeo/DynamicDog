@@ -206,11 +206,7 @@ class Controller:
         return (d is not None and b is not None and bool(d.frame) and
                 d.frame == b.frame and
                 0 <= now - d.received <= c.pose_timeout and
-                0 <= now - b.received <= c.pose_timeout and
-                abs(d.received - b.received) <= c.sync_tolerance and
-                ((d.stamp == b.stamp == 0) or
-                 (d.stamp > 0 and b.stamp > 0 and
-                  abs(d.stamp - b.stamp) <= c.sync_tolerance)))
+                0 <= now - b.received <= c.pose_timeout)
 
     def inside_field(self, x, y):
         """场地范围包括球门后的小块区域，供越线判定。"""
