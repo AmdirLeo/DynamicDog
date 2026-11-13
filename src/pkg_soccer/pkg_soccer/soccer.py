@@ -66,6 +66,10 @@ class Soccer(Node):
         self.calibrate_goal = self.param('calibrate_goal', '')
         self.field_width = float(self.param('field_width', 3.0))
         self.field_end_margin = float(self.param('field_end_margin', 0.6))
+        self.calibration_pose_timeout = float(
+            self.param('calibration_pose_timeout', 2.0))
+        self.calibration_window = float(
+            self.param('calibration_window', 8.0))
         if (type(self.use_mocap_goals) is not bool or
                 self.attack_goal not in ('goal_left', 'goal_right')):
             raise ValueError('attack_goal 为 goal_left/goal_right；use_mocap_goals 为布尔值')
@@ -76,6 +80,11 @@ class Soccer(Node):
         if not (math.isfinite(self.field_width) and self.field_width > values['goal_width'] and
                 math.isfinite(self.field_end_margin) and self.field_end_margin > 0):
             raise ValueError('field_width 必须大于 goal_width，field_end_margin 必须为正数')
+        if (not math.isfinite(self.calibration_pose_timeout) or
+                not math.isfinite(self.calibration_window) or
+                self.calibration_pose_timeout <= 0 or self.calibration_window <
+                self.calibration_pose_timeout):
+            raise ValueError('calibration_pose_timeout/window 参数无效')
         self.goals = {}
         self.goal_offsets = {}
         self.goal_subs = []
@@ -86,6 +95,7 @@ class Soccer(Node):
         self.goal_note = '等待两个球门的动捕位姿'
         self.goal_raw = {}
         self.calibration_values = []
+        self.calibration_pair = (0, 0)
         self.calibration_complete = False
         self.calibration_reported = False
         if (not self.world_frame or not self.dog_topic or not self.ball_topic or
@@ -220,12 +230,12 @@ class Soccer(Node):
                 self.goal_note = '未收到 /vrpn/ball/pose'
             self.calibration_values.clear()
             return True
-        if now - goal.received > self.controller.cfg.pose_timeout:
-            self.goal_note = f'{self.calibrate_goal} 位姿已超过 {self.controller.cfg.pose_timeout}s'
+        if now - goal.received > self.calibration_pose_timeout:
+            self.goal_note = f'{self.calibrate_goal} 位姿已超过 {self.calibration_pose_timeout}s'
             self.calibration_values.clear()
             return True
-        if now - ball.received > self.controller.cfg.pose_timeout:
-            self.goal_note = f'ball 位姿已超过 {self.controller.cfg.pose_timeout}s'
+        if now - ball.received > self.calibration_pose_timeout:
+            self.goal_note = f'ball 位姿已超过 {self.calibration_pose_timeout}s'
             self.calibration_values.clear()
             return True
         if goal.frame != ball.frame:
@@ -239,16 +249,20 @@ class Soccer(Node):
         dx, dy = ball.x - goal.x, ball.y - goal.y
         ox = dx*math.cos(goal.yaw) + dy*math.sin(goal.yaw)
         oy = -dx*math.sin(goal.yaw) + dy*math.cos(goal.yaw)
-        self.calibration_values.append((ox, oy))
-        if len(self.calibration_values) > 20:
-            self.calibration_values.pop(0)
+        pair = (goal.sequence, ball.sequence)
+        if pair != self.calibration_pair:
+            self.calibration_values.append((now, ox, oy))
+            self.calibration_pair = pair
+        self.calibration_values = [
+            sample for sample in self.calibration_values
+            if now - sample[0] <= self.calibration_window]
         if len(self.calibration_values) < 20:
             self.goal_note = '已收到门和球，正在检查静止稳定性'
             return True
-        mean_x = sum(v[0] for v in self.calibration_values) / 20
-        mean_y = sum(v[1] for v in self.calibration_values) / 20
+        mean_x = sum(v[1] for v in self.calibration_values) / len(self.calibration_values)
+        mean_y = sum(v[2] for v in self.calibration_values) / len(self.calibration_values)
         spread = max(math.hypot(x - mean_x, y - mean_y)
-                     for x, y in self.calibration_values)
+                     for _, x, y in self.calibration_values)
         if spread > 0.02:
             self.goal_note = f'球或门仍在移动，最近窗口最大偏差 {spread:.3f}m'
             return True
