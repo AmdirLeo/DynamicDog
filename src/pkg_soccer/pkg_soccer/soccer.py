@@ -1,8 +1,9 @@
 """ROS 2 动捕足球节点。
 
-前置条件（No4 课件）：FZMotion 导出选 Z-up；创建狗刚体时狗头朝 +X；
+前置条件（No4 课件）：FZMotion 导出选 Z-up；狗刚体局部 +X 应与狗头一致；
 启动 vrpn_listener，确认两刚体发布 geometry_msgs/PoseStamped，单位为米。
-先用遥控让狗站稳，停止其他运动控制节点；本节点不自动站立。
+启用运动后，启动时坐/趴会请求一次站立并等待站稳；停止其他运动控制节点。
+初始朝向可以任意；刚体朝向与狗头不一致时用 dog_yaw_offset（弧度）修正。
 
 编译、只观察：
     colcon build --packages-select pkg_soccer
@@ -11,7 +12,7 @@
 
 现场标定后启用（球门净宽和场地宽度为示例，请实际测量）：
     ros2 run pkg_soccer soccer --ros-args -p enable_motion:=true \
-      -p attack_goal:=goal_right -p goal_width:=1.0 -p field_width:=3.0
+      -p attack_goal:=goal_right -p goal_width:=1.53 -p field_width:=6.0
 
 默认使用两个球门刚体定位，球门须正对；进攻方向为本方门中心到对方门中心。
 goal_left/right_offset 是各自刚体坐标系内原点到门线中心的 [x,y] 米偏移。
@@ -41,6 +42,7 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 
 from .control import Config, Controller, Pose, wrap_angle, yaw_from_quaternion
+from .stand_guard import StandGuard
 
 
 class Soccer(Node):
@@ -63,10 +65,18 @@ class Soccer(Node):
         self.position_scale = float(self.param('position_scale', 1.0))
         self.yaw_offset = float(self.param('dog_yaw_offset', 0.0))
         self.posture_timeout = float(self.param('posture_timeout', 1.0))
+        self.auto_stand = self.param('auto_stand', True)
+        self.stand_timeout = float(self.param('stand_timeout', 25.0))
+        if type(self.auto_stand) is not bool:
+            raise ValueError('auto_stand 必须为 true/false')
+        self.stand_guard = StandGuard(303, self.posture_timeout, self.stand_timeout)
+        self.stand_client = None
+        self.stand_future = None
         self.use_mocap_goals = self.param('use_mocap_goals', True)
         self.attack_goal = self.param('attack_goal', 'goal_right')
         self.calibrate_goal = self.param('calibrate_goal', '')
-        self.field_width = float(self.param('field_width', 3.0))
+        # 用户估计约 6m，需现场确认；这是边界判断，不是自动测量值。
+        self.field_width = float(self.param('field_width', 6.0))
         self.field_end_margin = float(self.param('field_end_margin', 0.6))
         self.goal_pose_timeout = float(self.param('goal_pose_timeout', 2.0))
         self.calibration_pose_timeout = float(
@@ -121,9 +131,6 @@ class Soccer(Node):
             raise ValueError('位置比例、偏航和姿态超时必须有限')
         if self.position_scale <= 0 or self.posture_timeout <= 0:
             raise ValueError('position_scale 和 posture_timeout 必须为正数')
-        self.status_at = None
-        self.status_count = 0
-        self.status_ready = False
         self.armed_once = False
         self.servo_active = False
         self.last_report = -math.inf
@@ -142,8 +149,13 @@ class Soccer(Node):
         self.ball_sub = self.create_subscription(
             PoseStamped, self.ball_topic, lambda msg: self.on_pose('ball', msg), self.qos)
         if self.use_mocap_goals:
+            # 用户实测的刚体原点到门线中心偏移，单位米。
+            measured_offsets = {
+                'goal_left': [0.125, -0.030],
+                'goal_right': [0.034, 0.017],
+            }
             for name in ('goal_left', 'goal_right'):
-                offset = self.param(name + '_offset', [0.0, 0.0])
+                offset = self.param(name + '_offset', measured_offsets[name])
                 if len(offset) != 2 or not all(math.isfinite(v) for v in offset):
                     raise ValueError(name + '_offset 应为 [x,y]，单位米')
                 self.goal_offsets[name] = offset
@@ -155,16 +167,31 @@ class Soccer(Node):
             self.pub = self.create_publisher(MotionServoCmd, self.endpoint('motion_servo_cmd'), 1)
             self.status_sub = self.create_subscription(
                 MotionStatus, self.endpoint('motion_status'), self.on_status, self.qos)
+            if self.auto_stand:
+                from protocol.srv import MotionResultCmd
+                self.stand_service_type = MotionResultCmd
+                self.stand_client = self.create_client(
+                    MotionResultCmd, self.endpoint('motion_result_cmd'))
         self.timer = self.create_timer(
             0.05, self.on_timer, clock=Clock(clock_type=ClockType.STEADY_TIME))
         self.get_logger().info(
             f'动捕足球智能体：dog={self.dog_topic}, ball={self.ball_topic}, '
             f'frame={self.world_frame}；进攻球门={self.attack_goal}；'
             f'球门动捕={self.use_mocap_goals}；运动输出={self.enable_motion}')
-        self.get_logger().info(
-            '先标定球门/场地和触球距离。运动模式需手动站稳并收到正常 motion_status。'
-            if self.enable_motion else
-            '当前仅观察：不会创建运动发布器。确认坐标后以 enable_motion:=true 重启。')
+        if self.calibrate_goal:
+            self.get_logger().info(
+                f'当前为门中心标定模式：calibrate_goal={self.calibrate_goal!r}；'
+                '稳定采样后输出 offset 并退出。')
+        elif self.enable_motion:
+            self.get_logger().info(
+                f'当前为运动模式：auto_stand={self.auto_stand}；'
+                '等待正常 motion_status，站稳后才允许踢球。')
+        else:
+            self.get_logger().info(
+                '当前为 OBSERVE 观察模式：calibrate_goal 为空，不计算或输出 offset。'
+                '已有偏移会应用于门中心定位；确认后以 enable_motion:=true 重启。')
+        if self.use_mocap_goals:
+            self.get_logger().info(f'采用球门偏移（米）：{self.goal_offsets}')
 
     def param(self, name, default):
         """启动参数只读，避免运行时变更却未实际应用。"""
@@ -363,32 +390,71 @@ class Soccer(Node):
         return True
 
     def on_status(self, msg):
-        """启动连续三帧站稳；运行中故障/人工改变姿态后禁止自动恢复。"""
-        now = time.monotonic()
-        if self.status_at is not None and now - self.status_at > self.posture_timeout:
-            self.status_count = 0
-            if self.armed_once:
-                self.controller.stop('运动状态断流，请检查机器狗后重启')
-        self.status_at = now
+        """按运动反馈确认坐/趴/站姿；运行后姿态改变则停止，不再次起身。"""
+        guard = self.stand_guard
         try:
             healthy = (msg.ori_error == 0 and msg.footpos_error == 0 and
                        len(msg.motor_error) > 0 and
-                       all((int(v) & 0x3fffffff) == 0 for v in msg.motor_error))
-            standing = (msg.motion_id == 112 or
-                        msg.motion_id == 111 and 96 <= msg.order_process_bar <= 100 or
-                        msg.motion_id == 303)
-            if not healthy or msg.switch_status not in (0, 1):
-                self.controller.stop('运动状态报告故障或禁止切换')
-            if self.armed_once and not standing:
-                self.controller.stop('运行中姿态被改变，交还控制')
-            self.status_ready = healthy and standing and msg.switch_status in (0, 1)
-            if self.status_ready and msg.switch_status == 0:
-                self.status_count += 1
-            elif not self.armed_once:
-                self.status_count = 0
+                       all((int(v) & 0x3fffffff) == 0 for v in msg.motor_error) and
+                       0 <= msg.order_process_bar <= 100)
+            guard.update(msg.motion_id, msg.switch_status, msg.order_process_bar,
+                         healthy, time.monotonic())
         except (AttributeError, TypeError, ValueError):
-            self.status_ready = False
-            self.controller.stop('MotionStatus 字段不兼容')
+            guard.fail('MotionStatus 字段不兼容')
+        if guard.state == 'POSTURE_FAILED':
+            self.controller.stop(guard.reason)
+            self.cancel_stand_wait()
+
+    def cancel_stand_wait(self):
+        """取消本地服务等待；不会声称已经撤销服务端的起身动作。"""
+        if self.stand_future is not None:
+            if not self.stand_future.done():
+                self.stand_future.cancel()
+            self.stand_future = None
+
+    def posture_allows_motion(self, now):
+        """只请求一次 111 站立；服务成功且连续反馈站稳后才发送 303 步态。"""
+        guard = self.stand_guard
+        # 先检查超时，晚到的服务结果不能解除故障锁定。
+        guard.command(now)
+        if guard.state == 'POSTURE_FAILED':
+            self.controller.stop(guard.reason)
+            self.cancel_stand_wait()
+            return False
+        if self.stand_future is not None and self.stand_future.done():
+            future = self.stand_future
+            self.stand_future = None
+            try:
+                response = future.result()
+                guard.result(response.result, response.motion_id, response.code)
+            except Exception as exc:
+                guard.fail(f'站立服务异常：{exc}')
+        action = guard.command(now)
+        if action == 'REQUEST':
+            if not self.auto_stand:
+                guard.reason = 'auto_stand=false，请手动站稳'
+            elif not self.stand_client.service_is_ready():
+                guard.reason = '等待站立服务：' + self.endpoint('motion_result_cmd')
+            else:
+                guard.requested(now)
+                try:
+                    request = self.stand_service_type.Request()
+                    request.motion_id = 111
+                    request.cmd_source = 0
+                    request.duration = 0
+                    for name, size in (
+                            ('vel_des', 3), ('rpy_des', 3), ('pos_des', 3),
+                            ('acc_des', 6), ('ctrl_point', 3),
+                            ('foot_pose', 6), ('step_height', 2)):
+                        setattr(request, name, [0.0] * size)
+                    self.stand_future = self.stand_client.call_async(request)
+                    self.get_logger().info('已请求站立 motion_id=111，等待服务成功和站稳反馈。')
+                except Exception as exc:
+                    guard.fail(f'发送站立请求失败：{exc}')
+        if guard.state == 'POSTURE_FAILED':
+            self.controller.stop(guard.reason)
+            self.cancel_stand_wait()
+        return action == 'WALK'
 
     def publish(self, velocity, end=False):
         """课件的 303 步态支持 [vx, vy, wz]，结束帧使用协议常量。"""
@@ -455,15 +521,12 @@ class Soccer(Node):
                 self.last_report = now
             return
         if self.enable_motion and not c.finished:
-            fresh = self.status_at is not None and now - self.status_at <= self.posture_timeout
-            if self.armed_once and not fresh:
-                c.stop('运动状态超时，请检查后重启')
-            if not c.finished and not (fresh and self.status_ready and
-                                       (self.armed_once or self.status_count >= 3)):
+            if not self.posture_allows_motion(now):
                 self.end_motion()
-                self.report(now, 'WAIT_STAND', '等待手动站稳及连续正常状态', Controller.ZERO)
+                guard = self.stand_guard
+                self.report(now, guard.state, guard.reason, Controller.ZERO)
                 return
-            if not c.finished and not self.armed_once:
+            if not self.armed_once:
                 self.armed_once = True
                 c.wait_for_pose('站稳后重新确认动捕数据')
         if not c.finished and not self.configure_goals(now):
@@ -495,6 +558,7 @@ class Soccer(Node):
         self.timer.cancel()
         active = self.servo_active
         self.controller.stop('用户退出')
+        self.cancel_stand_wait()
         if active:
             for _ in range(3):
                 self.publish(Controller.ZERO, end=True)
