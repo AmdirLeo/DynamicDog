@@ -164,6 +164,7 @@ class Soccer(Node):
                                    yaw, now, msg.header.frame_id, stamp)
         except (ValueError, TypeError, AttributeError) as exc:
             setattr(self.controller, kind, None)
+            self.goal_note = str(exc)
             self.controller.wait_for_pose(str(exc))
             if now - self.last_error_report >= 1.0:
                 self.get_logger().warning(str(exc))
@@ -212,11 +213,27 @@ class Soccer(Node):
             return False
         goal = self.goal_raw.get(self.calibrate_goal)
         ball = self.controller.ball
-        if (goal is None or ball is None or
-                now - goal.received > self.controller.cfg.pose_timeout or
-                now - ball.received > self.controller.cfg.pose_timeout or
-                goal.frame != ball.frame or
-                abs(goal.received - ball.received) > self.controller.cfg.sync_tolerance):
+        if goal is None or ball is None:
+            if goal is None and self.goal_note in ('', '等待两个球门的动捕位姿'):
+                self.goal_note = '未收到目标门话题 ' + self.calibrate_goal
+            elif ball is None and self.goal_note in ('', '等待两个球门的动捕位姿'):
+                self.goal_note = '未收到 /vrpn/ball/pose'
+            self.calibration_values.clear()
+            return True
+        if now - goal.received > self.controller.cfg.pose_timeout:
+            self.goal_note = f'{self.calibrate_goal} 位姿已超过 {self.controller.cfg.pose_timeout}s'
+            self.calibration_values.clear()
+            return True
+        if now - ball.received > self.controller.cfg.pose_timeout:
+            self.goal_note = f'ball 位姿已超过 {self.controller.cfg.pose_timeout}s'
+            self.calibration_values.clear()
+            return True
+        if goal.frame != ball.frame:
+            self.goal_note = f'坐标系不一致：门={goal.frame!r}，球={ball.frame!r}'
+            self.calibration_values.clear()
+            return True
+        if abs(goal.received - ball.received) > self.controller.cfg.sync_tolerance:
+            self.goal_note = '门和球的接收时间不同步'
             self.calibration_values.clear()
             return True
         dx, dy = ball.x - goal.x, ball.y - goal.y
@@ -226,12 +243,14 @@ class Soccer(Node):
         if len(self.calibration_values) > 20:
             self.calibration_values.pop(0)
         if len(self.calibration_values) < 20:
+            self.goal_note = '已收到门和球，正在检查静止稳定性'
             return True
         mean_x = sum(v[0] for v in self.calibration_values) / 20
         mean_y = sum(v[1] for v in self.calibration_values) / 20
         spread = max(math.hypot(x - mean_x, y - mean_y)
                      for x, y in self.calibration_values)
         if spread > 0.02:
+            self.goal_note = f'球或门仍在移动，最近窗口最大偏差 {spread:.3f}m'
             return True
         if not self.calibration_reported:
             self.get_logger().info(
@@ -367,8 +386,9 @@ class Soccer(Node):
                 return
             if now - self.last_report >= 1.0:
                 self.get_logger().info(
-                    f'自动标定 {self.calibrate_goal}：请把球心放到门线中心，'
-                    '保持约 1 秒；检测到稳定数据后自动退出。')
+                    f'自动标定 {self.calibrate_goal}：{self.goal_note or "等待数据"}；'
+                    '请把球心放到门线中心并保持约 1 秒。'
+                    f'当前采样 {len(self.calibration_values)}/20。')
                 self.last_report = now
             return
         if self.enable_motion and not c.finished:
