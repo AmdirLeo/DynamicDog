@@ -73,6 +73,10 @@ class Soccer(Node):
             self.param('calibration_pose_timeout', 2.0))
         self.calibration_window = float(
             self.param('calibration_window', 8.0))
+        self.calibration_min_samples = int(
+            self.param('calibration_min_samples', 12))
+        self.calibration_spread = float(
+            self.param('calibration_spread', 0.05))
         if (type(self.use_mocap_goals) is not bool or
                 self.attack_goal not in ('goal_left', 'goal_right')):
             raise ValueError('attack_goal 为 goal_left/goal_right；use_mocap_goals 为布尔值')
@@ -90,6 +94,10 @@ class Soccer(Node):
                 self.calibration_pose_timeout <= 0 or self.calibration_window <
                 self.calibration_pose_timeout):
             raise ValueError('calibration_pose_timeout/window 参数无效')
+        if (self.calibration_min_samples < 3 or
+                not math.isfinite(self.calibration_spread) or
+                self.calibration_spread <= 0):
+            raise ValueError('calibration_min_samples/spread 参数无效')
         self.goals = {}
         self.goal_offsets = {}
         self.goal_subs = []
@@ -126,8 +134,11 @@ class Soccer(Node):
             history=HistoryPolicy.KEEP_LAST, depth=1,
             reliability=ReliabilityPolicy.BEST_EFFORT,
             durability=DurabilityPolicy.VOLATILE)
-        self.dog_sub = self.create_subscription(
-            PoseStamped, self.dog_topic, lambda msg: self.on_pose('dog', msg), self.qos)
+        # 门中心标定不需要狗位姿；不订阅 dog 可避免狗断流干扰 offset 采样。
+        self.dog_sub = None
+        if not self.calibrate_goal:
+            self.dog_sub = self.create_subscription(
+                PoseStamped, self.dog_topic, lambda msg: self.on_pose('dog', msg), self.qos)
         self.ball_sub = self.create_subscription(
             PoseStamped, self.ball_topic, lambda msg: self.on_pose('ball', msg), self.qos)
         if self.use_mocap_goals:
@@ -268,14 +279,14 @@ class Soccer(Node):
         self.calibration_values = [
             sample for sample in self.calibration_values
             if now - sample[0] <= self.calibration_window]
-        if len(self.calibration_values) < 20:
+        if len(self.calibration_values) < self.calibration_min_samples:
             self.goal_note = '已收到门和球，正在检查静止稳定性'
             return True
         mean_x = sum(v[1] for v in self.calibration_values) / len(self.calibration_values)
         mean_y = sum(v[2] for v in self.calibration_values) / len(self.calibration_values)
         spread = max(math.hypot(x - mean_x, y - mean_y)
                      for _, x, y in self.calibration_values)
-        if spread > 0.02:
+        if spread > self.calibration_spread:
             self.goal_note = f'球或门仍在移动，最近窗口最大偏差 {spread:.3f}m'
             return True
         if not self.calibration_reported:
@@ -439,7 +450,8 @@ class Soccer(Node):
                 self.get_logger().info(
                     f'自动标定 {self.calibrate_goal}：{self.goal_note or "等待数据"}；'
                     '请把球心放到门线中心并保持约 1 秒。'
-                    f'当前采样 {len(self.calibration_values)}/20。')
+                    f'当前采样 {len(self.calibration_values)}/'
+                    f'{self.calibration_min_samples}。')
                 self.last_report = now
             return
         if self.enable_motion and not c.finished:
