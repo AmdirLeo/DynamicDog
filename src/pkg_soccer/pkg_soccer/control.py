@@ -29,8 +29,8 @@ class Config(NamedTuple):
     goal_x: float = 2.0
     goal_y: float = 0.0
     goal_yaw: float = 0.0  # 从场内指向球门后方的法线方向；0 表示 +X。
-    goal_width: float = 1.0
-    ball_radius: float = 0.08
+    goal_width: float = 1.53
+    ball_radius: float = 0.12
     pose_timeout: float = 0.5
     sync_tolerance: float = 0.15
     approach_speed: float = 0.12

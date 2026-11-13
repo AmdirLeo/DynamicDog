@@ -18,8 +18,9 @@ goal_left/right_offset 是各自刚体坐标系内原点到门线中心的 [x,y]
 门宽用卷尺测两门柱内侧净距离；场地宽度为两侧边线间距，场地居中于两门。
 门中心偏移标定：将 ball 刚体的原点放到该球门门线中心，再以
     ros2 run pkg_soccer soccer --ros-args -p calibrate_goal:=goal_left
-观察终端输出的 goal_left_offset；换到另一球门重复，运行时传入两个偏移。
-若 ball 刚体原点就在球心，只需将球摆在门线中点；高度不影响平面标定。
+启动自动采样；可以离开终端去摆球，稳定约 1 秒后程序会自动打印结果并退出。
+换到另一球门重复，运行时传入两个偏移。若 ball 刚体原点就在球心，
+只需将球放在门线中点；高度不影响平面标定。
 球门/场地原点和角度由动捕自动获得，field_end_margin 是门线后允许活动的距离。
 use_mocap_goals:=false 时可手工指定 goal_x/y/yaw 和 field_* 坐标参数。
 狗刚体名称和运动接口 dog_name 是两件事，分别配置。
@@ -83,6 +84,10 @@ class Soccer(Node):
         self.goal_pair = (0, 0)
         self.goal_reference = None
         self.goal_note = '等待两个球门的动捕位姿'
+        self.goal_raw = {}
+        self.calibration_values = []
+        self.calibration_complete = False
+        self.calibration_reported = False
         if (not self.world_frame or not self.dog_topic or not self.ball_topic or
                 self.dog_topic == self.ball_topic):
             raise ValueError('坐标系/话题不能为空，狗和球的话题必须不同')
@@ -165,16 +170,18 @@ class Soccer(Node):
                 self.last_error_report = now
 
     def on_goal(self, name, msg):
-        """将球门刚体原点和局部偏移转换成世界坐标中的门线中心。"""
+        """保存球门刚体原点，同时应用正式运行时的门中心偏移。"""
         now = time.monotonic()
         try:
             if msg.header.frame_id != self.world_frame:
                 raise ValueError(name + ' 坐标系与 world_frame 不符')
             p, q = msg.pose.position, msg.pose.orientation
             yaw = yaw_from_quaternion(q.x, q.y, q.z, q.w)
+            raw_x = p.x*self.position_scale
+            raw_y = p.y*self.position_scale
             ox, oy = self.goal_offsets[name]
-            x = p.x*self.position_scale + ox*math.cos(yaw) - oy*math.sin(yaw)
-            y = p.y*self.position_scale + ox*math.sin(yaw) + oy*math.cos(yaw)
+            x = raw_x + ox*math.cos(yaw) - oy*math.sin(yaw)
+            y = raw_y + ox*math.sin(yaw) + oy*math.cos(yaw)
             stamp = msg.header.stamp.sec + msg.header.stamp.nanosec*1e-9
             if not all(math.isfinite(v) for v in (x, y, stamp)) or stamp < 0:
                 raise ValueError(name + ' 位姿无效')
@@ -188,13 +195,52 @@ class Soccer(Node):
                         self.controller.stop('球门动捕时间戳倒退，请重启')
                     return
             self.goal_sequence += 1
+            self.goal_raw[name] = Pose(raw_x, raw_y, yaw, now,
+                                       self.world_frame, stamp, self.goal_sequence)
             self.goals[name] = Pose(x, y, yaw, now, self.world_frame, stamp,
                                     self.goal_sequence)
         except (AttributeError, TypeError, ValueError) as exc:
             self.goals.pop(name, None)
+            self.goal_raw.pop(name, None)
             self.goal_confirm = 0
             self.goal_note = str(exc)
             self.controller.wait_for_pose(str(exc))
+
+    def calibrate_goal_offset(self, now):
+        """自动采样选定门和球的相对位姿，稳定一秒后打印并请求退出。"""
+        if not self.calibrate_goal or self.calibration_complete:
+            return False
+        goal = self.goal_raw.get(self.calibrate_goal)
+        ball = self.controller.ball
+        if (goal is None or ball is None or
+                now - goal.received > self.controller.cfg.pose_timeout or
+                now - ball.received > self.controller.cfg.pose_timeout or
+                goal.frame != ball.frame or
+                abs(goal.received - ball.received) > self.controller.cfg.sync_tolerance):
+            self.calibration_values.clear()
+            return True
+        dx, dy = ball.x - goal.x, ball.y - goal.y
+        ox = dx*math.cos(goal.yaw) + dy*math.sin(goal.yaw)
+        oy = -dx*math.sin(goal.yaw) + dy*math.cos(goal.yaw)
+        self.calibration_values.append((ox, oy))
+        if len(self.calibration_values) > 20:
+            self.calibration_values.pop(0)
+        if len(self.calibration_values) < 20:
+            return True
+        mean_x = sum(v[0] for v in self.calibration_values) / 20
+        mean_y = sum(v[1] for v in self.calibration_values) / 20
+        spread = max(math.hypot(x - mean_x, y - mean_y)
+                     for x, y in self.calibration_values)
+        if spread > 0.02:
+            return True
+        if not self.calibration_reported:
+            self.get_logger().info(
+                f'自动标定完成：{self.calibrate_goal}_offset='
+                f'[{mean_x:.3f}, {mean_y:.3f}] 米；'
+                '请记录该值，程序即将退出。')
+            self.calibration_reported = True
+        self.calibration_complete = True
+        return True
 
     def configure_goals(self, now):
         """从两门中心标定球场；运行中移动球门必须重启并重新标定。"""
@@ -314,6 +360,17 @@ class Soccer(Node):
         """先通过姿态门控，再计算本周期指令，停止时发送 SERVO_END。"""
         now = time.monotonic()
         c = self.controller
+        if self.calibrate_goal:
+            # 标定模式只需要目标门和球，不要求狗位姿或另一扇门在线。
+            self.calibrate_goal_offset(now)
+            if self.calibration_complete:
+                return
+            if now - self.last_report >= 1.0:
+                self.get_logger().info(
+                    f'自动标定 {self.calibrate_goal}：请把球心放到门线中心，'
+                    '保持约 1 秒；检测到稳定数据后自动退出。')
+                self.last_report = now
+            return
         if self.enable_motion and not c.finished:
             fresh = self.status_at is not None and now - self.status_at <= self.posture_timeout
             if self.armed_once and not fresh:
@@ -337,18 +394,8 @@ class Soccer(Node):
             if c.poses_valid(now):
                 d, b = c.dog, c.ball
                 yaw = math.atan2(c.cfg.goal_y - b.y, c.cfg.goal_x - b.x)
-                if self.calibrate_goal:
-                    goal = self.goals[self.calibrate_goal]
-                    dx, dy = b.x - goal.x, b.y - goal.y
-                    ox, oy = self.goal_offsets[self.calibrate_goal]
-                    ox += dx*math.cos(goal.yaw) + dy*math.sin(goal.yaw)
-                    oy += -dx*math.sin(goal.yaw) + dy*math.cos(goal.yaw)
-                    reason = (f'请将 ball 原点放在门线中心；当前测得 '
-                              f'{self.calibrate_goal}_offset:=[{ox:.3f},{oy:.3f}] '
-                              '米（记录稳定值，作为正式运行参数）')
-                else:
-                    reason = (f'球距={math.hypot(b.x-d.x, b.y-d.y):.2f}m '
-                              f'射门方向={yaw:.2f}rad（仅观察）')
+                reason = (f'球距={math.hypot(b.x-d.x, b.y-d.y):.2f}m '
+                          f'射门方向={yaw:.2f}rad（仅观察）')
                 self.report(now, 'OBSERVE', reason, Controller.ZERO)
             else:
                 self.report(now, 'WAIT_POSE', '等待同步动捕，检查话题/坐标系', Controller.ZERO)
@@ -381,7 +428,8 @@ def main(args=None):
         for signum in (signal.SIGINT, signal.SIGTERM):
             previous[signum] = signal.signal(signum, lambda *_: stopping.set())
         node = Soccer()
-        while rclpy.ok() and not stopping.is_set():
+        while rclpy.ok() and not stopping.is_set() and not (
+                node is not None and node.calibration_complete):
             rclpy.spin_once(node, timeout_sec=0.1)
     except KeyboardInterrupt:
         pass
