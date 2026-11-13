@@ -217,9 +217,8 @@ class Soccer(Node):
                     self.goal_confirm = 0
                     self.controller.wait_for_pose('球门动捕曾断流，重新确认')
                 if stamp > 0 and previous.stamp > 0 and stamp <= previous.stamp:
-                    if stamp < previous.stamp:
-                        self.controller.stop('球门动捕时间戳倒退，请重启')
-                    return
+                    # 以实际回调时间判断新鲜度；不把复用的 VRPN stamp 当成重复帧。
+                    stamp = previous.stamp
             self.goal_sequence += 1
             self.goal_raw[name] = Pose(raw_x, raw_y, yaw, now,
                                        frame, stamp, self.goal_sequence)

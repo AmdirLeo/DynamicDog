@@ -172,18 +172,17 @@ class Controller:
         if gap:
             self.wait_for_pose('等待连续动捕数据')
         if previous is not None and stamp > 0 and previous.stamp > 0:
-            if stamp < previous.stamp:
-                self.stop('动捕时间戳倒退，请检查 VRPN 后重启')
-                return
-            if stamp == previous.stamp:
-                return
+            # 部分 VRPN 封装会复用 header.stamp；消息本身仍是新帧，
+            # 不能因为源时间戳相同而停止刷新接收时间。
+            if stamp <= previous.stamp:
+                stamp = previous.stamp
         self.sequence += 1
         pose = Pose(x, y, yaw, now, frame, stamp, self.sequence)
         if kind == 'ball':
             self.ball_speed = math.inf
             if previous is not None and not gap and previous.frame == frame:
-                dt = (stamp - previous.stamp if stamp > 0 and previous.stamp > 0
-                      else now - previous.received)
+                source_dt = stamp - previous.stamp
+                dt = source_dt if source_dt > 0 else now - previous.received
                 if dt > 0:
                     self.ball_speed = math.hypot(x - previous.x, y - previous.y) / dt
                 before, side_before = self.goal_coordinates(previous.x, previous.y)
