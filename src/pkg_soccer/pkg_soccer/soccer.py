@@ -54,6 +54,14 @@ class Soccer(Node):
         values = {name: self.param(name, default)
                   for name, default in Config()._asdict().items()}
         self.controller = Controller(Config(**values))
+        self.control_mode = self.param('control_mode', 'rules')
+        if self.control_mode not in ('rules', 'rl'):
+            raise ValueError('control_mode 必须为 rules 或 rl')
+        if self.control_mode == 'rl':
+            from .rl_control import RLController
+            self.controller = RLController(
+                Config(**values), self.param('rl_model_path', ''),
+                float(self.param('rl_speed_limit', 0.30)))
         self.enable_motion = self.param('enable_motion', False)
         if type(self.enable_motion) is not bool:
             raise ValueError('enable_motion 必须为 true/false')
@@ -199,6 +207,11 @@ class Soccer(Node):
             f'触球={self.controller.cfg.kick_speed:.2f}m/s；'
             f'步态 motion_id={self.walk_motion_id}；'
             f'狗朝向修正 dog_yaw_offset={self.yaw_offset:.3f}rad')
+        if self.control_mode == 'rl':
+            self.get_logger().info(
+                f'RL stage2 已加载；平移限速={self.controller.speed_limit:.2f}m/s；'
+                'max_kicks 不适用于连续 RL 控制，进球/超时/故障时结束；'
+                f'模式={"实机控制" if self.enable_motion else "只推理、不发运动指令"}')
 
     def param(self, name, default):
         """启动参数只读，避免运行时变更却未实际应用。"""
@@ -495,9 +508,10 @@ class Soccer(Node):
             orientation = (f'；dog原始四元数(x,y,z,w)='
                            f'{tuple(round(v, 4) for v in self.dog_quaternion)}'
                            if self.dog_quaternion is not None else '')
+            progress = ('；PPO 连续控球' if self.control_mode == 'rl' else
+                        f'；射门 {self.controller.kicks}/{self.controller.cfg.max_kicks}')
             self.get_logger().info(
-                f'{state}: {reason}；{positions}；射门 {self.controller.kicks}/'
-                f'{self.controller.cfg.max_kicks}；速度=({velocity[0]:.2f},'
+                f'{state}: {reason}；{positions}{progress}；速度=({velocity[0]:.2f},'
                 f'{velocity[1]:.2f},{velocity[2]:.2f}){heading}{orientation}')
             self.last_state, self.last_report = state, now
 
@@ -551,6 +565,11 @@ class Soccer(Node):
             return
         # 观察模式只显示规划，不让静止的实机被虚拟计时推进到一次射门。
         if not self.enable_motion:
+            if self.control_mode == 'rl':
+                velocity = c.command(now)
+                self.report(now, 'RL_SHADOW' if c.state == 'RL' else c.state,
+                            c.reason + '（只推理，不发运动指令）', velocity)
+                return
             if c.poses_valid(now):
                 d, b = c.dog, c.ball
                 yaw = math.atan2(c.cfg.goal_y - b.y, c.cfg.goal_x - b.x)
