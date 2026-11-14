@@ -12,7 +12,8 @@
 
 现场标定后启用（球门净宽和场地宽度为示例，请实际测量）：
     ros2 run pkg_soccer soccer --ros-args -p enable_motion:=true \
-      -p attack_goal:=goal_right -p goal_width:=1.53 -p field_width:=6.0
+      -p attack_goal:=goal_right -p goal_width:=1.53 -p field_width:=6.0 \
+      -p walk_motion_id:=305
 
 默认使用两个球门刚体定位，球门须正对；进攻方向为本方门中心到对方门中心。
 goal_left/right_offset 是各自刚体坐标系内原点到门线中心的 [x,y] 米偏移。
@@ -67,7 +68,11 @@ class Soccer(Node):
         self.dog_quaternion = None
         self.posture_timeout = float(self.param('posture_timeout', 1.0))
         self.stand_timeout = float(self.param('stand_timeout', 25.0))
-        self.stand_guard = StandGuard(303, self.posture_timeout, self.stand_timeout)
+        self.walk_motion_id = int(self.param('walk_motion_id', 305))
+        if self.walk_motion_id not in (303, 305):
+            raise ValueError('walk_motion_id 只支持 303（慢速）或 305（快速）')
+        self.stand_guard = StandGuard(self.walk_motion_id, self.posture_timeout,
+                                      self.stand_timeout)
         self.stand_client = None
         self.stand_future = None
         self.use_mocap_goals = self.param('use_mocap_goals', True)
@@ -192,6 +197,7 @@ class Soccer(Node):
         self.get_logger().info(
             f'速度上限：行走={self.controller.cfg.approach_speed:.2f}m/s，'
             f'触球={self.controller.cfg.kick_speed:.2f}m/s；'
+            f'步态 motion_id={self.walk_motion_id}；'
             f'狗朝向修正 dog_yaw_offset={self.yaw_offset:.3f}rad')
 
     def param(self, name, default):
@@ -416,7 +422,7 @@ class Soccer(Node):
             self.stand_future = None
 
     def posture_allows_motion(self, now):
-        """只请求一次 111 站立；服务成功且连续反馈站稳后才发送 303 步态。"""
+        """只请求一次 111 站立；成功且连续反馈站稳后才发送快速步态。"""
         guard = self.stand_guard
         # 先检查超时，晚到的服务结果不能解除故障锁定。
         guard.command(now)
@@ -458,11 +464,11 @@ class Soccer(Node):
         return action == 'WALK'
 
     def publish(self, velocity, end=False):
-        """课件的 303 步态支持 [vx, vy, wz]，结束帧使用协议常量。"""
+        """发送可配置的 303/305 步态，结束帧使用协议常量。"""
         if self.pub is None:
             return
         msg = MotionServoCmd()
-        msg.motion_id = 303
+        msg.motion_id = self.walk_motion_id
         msg.cmd_type = MotionServoCmd.SERVO_END if end else MotionServoCmd.SERVO_DATA
         msg.cmd_source = 0
         msg.value = 2

@@ -2,7 +2,7 @@
 
 纯 Python，所有位置使用 Z-up 世界坐标（米），速度使用机身坐标。
 只规划狗与球的相对运动；场地应空旷，不包含其他机器人/障碍物避让。
-KICK 使用课程 303 步态前冲触球，不假定存在专用抬腿动作编号。
+KICK 使用可配置的 303/305 步态前冲触球，不假定存在专用抬腿动作编号。
 """
 
 import math
@@ -33,15 +33,17 @@ class Config(NamedTuple):
     ball_radius: float = 0.12
     pose_timeout: float = 0.5
     sync_tolerance: float = 0.15
-    approach_speed: float = 0.25
-    turn_speed: float = 0.5
-    angle_tolerance: float = 0.15
+    approach_speed: float = 0.45
+    turn_speed: float = 0.7
+    angle_tolerance: float = 0.25
     behind_distance: float = 0.70
     ball_clearance: float = 0.48
     position_tolerance: float = 0.07
+    kick_lateral_tolerance: float = 0.22
+    follow_distance: float = 0.32
     kick_distance: float = 0.38  # 球心到狗刚体原点，需现场标定。
     min_distance: float = 0.20
-    kick_speed: float = 0.30
+    kick_speed: float = 0.55
     kick_duration: float = 0.8
     kick_travel: float = 0.20
     ball_move_distance: float = 0.15
@@ -71,10 +73,12 @@ class Config(NamedTuple):
                 self.behind_distance <= 1.5):
             raise ValueError('需要 min_distance < kick_distance < '
                              'ball_clearance < behind_distance <= 1.5')
-        if self.approach_speed > 0.3 or self.kick_speed > 0.3:
-            raise ValueError('前进速度上限为 0.3 m/s')
-        if self.turn_speed > 0.8 or self.angle_tolerance > 0.3:
-            raise ValueError('turn_speed <= 0.8，angle_tolerance <= 0.3')
+        if self.approach_speed > 0.8 or self.kick_speed > 0.8:
+            raise ValueError('前进和触球速度不能大于 0.8 m/s')
+        if self.turn_speed > 1.0 or self.angle_tolerance > 0.5:
+            raise ValueError('turn_speed <= 1.0，angle_tolerance <= 0.5')
+        if self.kick_lateral_tolerance > 0.5:
+            raise ValueError('kick_lateral_tolerance 不能大于 0.5m')
         if self.kick_duration > 2 or self.kick_travel > 0.4:
             raise ValueError('kick_duration <= 2 秒，kick_travel <= 0.4 米')
         if type(self.max_kicks) is not int or self.max_kicks < 1:
@@ -126,6 +130,7 @@ class Controller:
         self.kicks = 0
         self.distance = None
         self.ball_speed = math.inf
+        self.ball_velocity = (0.0, 0.0)
         self.confirmed = 0
         self.confirm_pair = (0, 0)
         self.sequence = 0
@@ -190,7 +195,8 @@ class Controller:
                 source_dt = stamp - previous.stamp
                 dt = source_dt if source_dt > 0 else now - previous.received
                 if dt > 0:
-                    self.ball_speed = math.hypot(x - previous.x, y - previous.y) / dt
+                    self.ball_velocity = ((x - previous.x)/dt, (y - previous.y)/dt)
+                    self.ball_speed = math.hypot(*self.ball_velocity)
                 before, side_before = self.goal_coordinates(previous.x, previous.y)
                 after, side_after = self.goal_coordinates(x, y)
                 # 以整个球越过门线为准，线性插值定位越线瞬间，避免低帧率漏判。
@@ -387,14 +393,37 @@ class Controller:
                                  d.y + math.sin(self.kick_yaw),
                                  self.kick_yaw, c.kick_speed)
         if self.state == 'ASSESS':
-            if now - self.assess_at < c.assess_time or self.ball_speed > c.ball_still_speed:
+            if now - self.assess_at < c.assess_time:
                 return self.ZERO
-            self.state = 'POSITION'
+            # 球若仍沿球门方向滚动，继续跟球，避免每次触球后退回初始准备点。
+            gx, gy = c.goal_x - b.x, c.goal_y - b.y
+            goal_norm = max(math.hypot(gx, gy), 1e-9)
+            toward_goal = (self.ball_velocity[0]*gx + self.ball_velocity[1]*gy) / goal_norm
+            self.state = 'FOLLOW' if toward_goal > c.ball_still_speed else 'POSITION'
             self.settle_at = None
+        if self.state == 'FOLLOW':
+            gx, gy = c.goal_x - b.x, c.goal_y - b.y
+            goal_norm = max(math.hypot(gx, gy), 1e-9)
+            ux, uy = gx/goal_norm, gy/goal_norm
+            forward = (b.x-d.x)*ux + (b.y-d.y)*uy
+            lateral = -(b.x-d.x)*uy + (b.y-d.y)*ux
+            shot_yaw = math.atan2(uy, ux)
+            if (self.ball_speed > c.ball_still_speed and forward > 0 and
+                    abs(lateral) <= c.kick_lateral_tolerance and
+                    abs(wrap_angle(shot_yaw-d.yaw)) <= 0.4):
+                return self.drive_to(b.x-ux*c.follow_distance,
+                                     b.y-uy*c.follow_distance,
+                                     shot_yaw, c.approach_speed)
+            self.state = 'POSITION'
         if self.kicks >= c.max_kicks:
             self.stop('已达到射门次数上限，尚未确认进球')
             return self.ZERO
-        stage_x, stage_y = b.x - ux*c.behind_distance, b.y - uy*c.behind_distance
+        stage_distance = c.behind_distance
+        # 后续射门保持当前进攻侧，只退到安全触球距离，不再绕回 0.70m。
+        if self.kicks > 0 and forward > 0 and abs(lateral) <= c.kick_lateral_tolerance:
+            stage_distance = min(c.behind_distance,
+                                 max(c.kick_distance + 0.06, self.distance + 0.05))
+        stage_x, stage_y = b.x - ux*stage_distance, b.y - uy*stage_distance
         if not self.inside_field(stage_x, stage_y):
             self.stop('球后射门准备点在场外，无法组织射门')
             return self.ZERO
@@ -402,9 +431,14 @@ class Controller:
             self.reason = '绕到球后方，建立朝向球门的射门路线'
             if math.hypot(stage_x - d.x, stage_y - d.y) > c.position_tolerance:
                 target = self.route_target(stage_x, stage_y)
+                # 已经在球后且面向球门时，允许倒退到安全距离，避免触球后转身。
+                if (self.kicks > 0 and forward > 0 and
+                        abs(lateral) <= c.kick_lateral_tolerance and
+                        abs(heading_error) <= 0.4):
+                    return self.drive_to(*target, shot_yaw, c.approach_speed)
                 return self.navigate_to(*target)
             self.state = 'ALIGN'
-        if forward <= 0 or abs(lateral) > c.position_tolerance*1.5:
+        if forward <= -0.05 or abs(lateral) > c.kick_lateral_tolerance:
             self.state, self.reason = 'POSITION', '球偏离射门轴，重新绕球'
             self.settle_at = None
             return self.ZERO
@@ -416,7 +450,7 @@ class Controller:
             self.state, self.reason = 'POSITION', '与球过近，退出并重新组织'
             self.settle_at = None
             return self.ZERO
-        if forward > c.kick_distance + 0.02 or abs(lateral) > c.position_tolerance/2:
+        if forward > c.kick_distance + 0.05 or abs(lateral) > c.kick_lateral_tolerance:
             self.state, self.reason = 'APPROACH', '保持射门方向，慢速靠近球'
             self.settle_at = None
             # 目标略小于触发距离，避免比例控制永远渐近到达不了阈值。

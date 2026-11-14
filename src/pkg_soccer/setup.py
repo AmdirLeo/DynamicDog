@@ -16,5 +16,8 @@ setup(
     maintainer_email='mi@todo.todo',
     description='Closed-loop CyberDog soccer agent using VRPN motion capture.',
     license='Apache-2.0',
-    entry_points={'console_scripts': ['soccer = pkg_soccer.soccer:main']},
+    entry_points={'console_scripts': [
+        'soccer = pkg_soccer.soccer:main',
+        'record_motion = pkg_soccer.record_motion:main',
+    ]},
 )
