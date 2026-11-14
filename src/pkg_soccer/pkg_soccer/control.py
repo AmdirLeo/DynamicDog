@@ -35,6 +35,7 @@ class Config(NamedTuple):
     sync_tolerance: float = 0.15
     approach_speed: float = 0.45
     turn_speed: float = 0.7
+    turn_response_grace: float = 1.0  # 起转/换向后等待步态和通信响应，再检查方向。
     angle_tolerance: float = 0.25
     behind_distance: float = 0.70
     ball_clearance: float = 0.48
@@ -77,6 +78,8 @@ class Config(NamedTuple):
             raise ValueError('前进和触球速度不能大于 0.8 m/s')
         if self.turn_speed > 1.0 or self.angle_tolerance > 0.5:
             raise ValueError('turn_speed <= 1.0，angle_tolerance <= 0.5')
+        if self.turn_response_grace > 2.0:
+            raise ValueError('turn_response_grace <= 2 秒')
         if self.kick_lateral_tolerance > 0.5:
             raise ValueError('kick_lateral_tolerance 不能大于 0.5m')
         if self.kick_duration > 2 or self.kick_travel > 0.4:
@@ -142,6 +145,7 @@ class Controller:
         self.turn_checkpoint_yaw = None
         self.turn_sign = None
         self.turn_origin = None
+        self.turn_response_until = None
 
     @property
     def finished(self):
@@ -261,7 +265,8 @@ class Controller:
         if abs(error) > 0.45:
             return 0.0, 0.0, wz
         # 将导航速度限制在机身正前方，横移仅用于接近球时的小幅修正。
-        vx = min(self.cfg.approach_speed, max(0.04, 1.5*math.hypot(dx, dy)))
+        # 提前减速，避免有执行延迟时越过准备点，再追逐身后的路径点。
+        vx = min(self.cfg.approach_speed, max(0.04, 0.8*math.hypot(dx, dy)))
         vx *= max(0.0, math.cos(error))
         if not self.inside_field(self.dog.x + vx*math.cos(self.dog.yaw)*0.5,
                                  self.dog.y + vx*math.sin(self.dog.yaw)*0.5):
@@ -282,17 +287,27 @@ class Controller:
             self.turn_checkpoint_yaw = self.dog.yaw
             self.turn_sign = direction
             self.turn_origin = (self.dog.x, self.dog.y)
+            self.turn_response_until = now + self.cfg.turn_response_grace
         elif direction != self.turn_sign:
             self.turn_checkpoint = now
             self.turn_checkpoint_yaw = self.dog.yaw
             self.turn_sign = direction
+            self.turn_response_until = now + self.cfg.turn_response_grace
         if math.hypot(self.dog.x-self.turn_origin[0],
                       self.dog.y-self.turn_origin[1]) >= 0.15:
             self.turn_started = now
             self.turn_origin = (self.dog.x, self.dog.y)
+        # 换向后仍可能沿上一条指令转动。宽限期内持续更新基准，
+        # 不把旧方向残余转角累计成新指令的反向反馈。
+        if now < self.turn_response_until:
+            self.turn_checkpoint = now
+            self.turn_checkpoint_yaw = self.dog.yaw
+            if now - self.turn_started >= 12.0:
+                self.stop('连续原地转向超过 12 秒：检查狗刚体朝向与 dog_yaw_offset')
+            return self.ZERO if self.finished else velocity
         delta = wrap_angle(self.dog.yaw - self.turn_checkpoint_yaw)*direction
         if now - self.turn_checkpoint >= 0.4 and delta < -0.10:
-            self.stop('转向反馈与指令相反：检查 Z-up、刚体姿态轴和转向接口')
+            self.stop('等待转向响应后仍持续反向：检查执行延迟、控制冲突和姿态坐标')
         elif delta >= 0.04:
             self.turn_checkpoint = now
             self.turn_checkpoint_yaw = self.dog.yaw
@@ -429,7 +444,13 @@ class Controller:
             return self.ZERO
         if self.state == 'POSITION':
             self.reason = '绕到球后方，建立朝向球门的射门路线'
-            if math.hypot(stage_x - d.x, stage_y - d.y) > c.position_tolerance:
+            # 已进入球后射门走廊就朝球门对齐，无需精确踩中准备点。
+            # 否则接近/越过准备点时 atan2 会骤变，使狗背对球旋转。
+            in_shot_corridor = (
+                c.kick_distance <= forward <= stage_distance + 0.15 and
+                abs(lateral) <= c.kick_lateral_tolerance)
+            if (not in_shot_corridor and
+                    math.hypot(stage_x - d.x, stage_y - d.y) > c.position_tolerance):
                 target = self.route_target(stage_x, stage_y)
                 # 已经在球后且面向球门时，允许倒退到安全距离，避免触球后转身。
                 if (self.kicks > 0 and forward > 0 and
