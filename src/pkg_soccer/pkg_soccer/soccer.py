@@ -92,8 +92,10 @@ class Soccer(Node):
         # Lock the actual first VRPN frame for this run; do not guess its name.
         self.world_frame = self.fixed_param('world_frame', '')
         self.position_scale = float(self.fixed_param('position_scale', 1.0))
-        calibrated_yaw = math.pi if attacker_profile and self.dog_topic == '/vrpn/xll_dog/pose' else 0.
-        self.yaw_offset = float(self.param('dog_yaw_offset', calibrated_yaw))
+        # The rebuilt xll rigid body has +X aligned with the dog's head.
+        # Keep the default unrotated; a field-specific override remains
+        # available for a future rigid-body remount.
+        self.yaw_offset = float(self.param('dog_yaw_offset', 0.0))
         self.dog_quaternion = None
         self.posture_timeout = float(self.param('posture_timeout', 1.0))
         self.stand_timeout = float(self.param('stand_timeout', 25.0))
