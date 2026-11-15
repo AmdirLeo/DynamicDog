@@ -40,6 +40,11 @@ class StandGuard:
         return (self.motion_id == 112
                 or self.motion_id == 111 and self.progress >= 96)
 
+    def _idle(self):
+        """CyberDog firmware may report a healthy idle state this way."""
+        return (self.motion_id == 0 and self.switch_status == 14 and
+                self.progress >= 96)
+
     def update(self, motion_id, switch_status, progress, healthy, now):
         """每条状态消息调用一次；定时器不能代替新消息确认。"""
         gap = (self.last_received is not None
@@ -54,8 +59,9 @@ class StandGuard:
         self.switch_status = switch_status
         self.progress = progress
         self.healthy = healthy
-        normal = healthy and switch_status == 0
-        completed = self._standing() or motion_id == self.walk_id
+        normal = healthy and switch_status in (0, 1, 14)
+        completed = self._standing() or motion_id == self.walk_id or (
+            motion_id == 0 and switch_status == 14 and progress >= 96)
         resting = motion_id in (101, 143) and progress >= 96
         if normal and (completed or resting):
             self.stable_count = self.stable_count + 1 if previous == motion_id else 1
@@ -63,7 +69,7 @@ class StandGuard:
             self.stable_count = 0
         if self.state == 'POSTURE_FAILED':
             return
-        if not healthy or switch_status not in (0, 1):
+        if not healthy or switch_status not in (0, 1, 14):
             self.fail('运动状态报告故障或禁止切换，不能自动站立/行走')
         elif self.ready_once and motion_id not in (111, 112, self.walk_id):
             self.fail('运行中姿态改变，停止控制且不重新自动站立')
@@ -109,9 +115,11 @@ class StandGuard:
             self.state = 'READY'
             self.reason = '已确认处于站立或当前行走步态'
             return 'WALK'
-        if self.motion_id in (101, 143):
+        if self.motion_id in (101, 143) or self._idle():
             self.state = 'WAIT_STAND_SERVICE'
-            self.reason = '确认坐下/趴下，等待站立服务可用'
+            self.reason = ('确认坐下/趴下，等待站立服务可用'
+                           if self.motion_id in (101, 143) else
+                           '确认健康空闲状态，等待站立服务可用')
             return 'REQUEST'
         self.state = 'WAIT_POSTURE'
         self.reason = '姿态不在可自动起步范围内'
