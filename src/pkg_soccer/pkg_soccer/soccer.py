@@ -51,23 +51,40 @@ class Soccer(Node):
 
     def __init__(self):
         super().__init__('soccer')
-        values = {name: self.param(name, default)
-                  for name, default in Config()._asdict().items()}
-        self.controller = Controller(Config(**values))
         self.control_mode = self.param('control_mode', 'rules')
         if self.control_mode not in ('rules', 'rl'):
             raise ValueError('control_mode 必须为 rules 或 rl')
+        self.rl_policy = self.param('rl_policy', 'stage2')
+        if self.rl_policy not in ('stage2', 'attacker', 'defender'):
+            raise ValueError('rl_policy 必须为 stage2/attacker/defender')
+        duel = self.control_mode == 'rl' and self.rl_policy != 'stage2'
+        defaults = Config()
+        if duel:
+            defaults = defaults._replace(goal_x=4.585, goal_width=1.5,
+                                         field_min_x=-5., field_max_x=5.,
+                                         field_min_y=-2.75, field_max_y=2.75)
+        values = {name: self.param(name, default)
+                  for name, default in defaults._asdict().items()}
+        self.controller = Controller(Config(**values))
         if self.control_mode == 'rl':
             from .rl_control import RLController
             self.controller = RLController(
                 Config(**values), self.param('rl_model_path', ''),
-                float(self.param('rl_speed_limit', 0.30)))
+                float(self.param('rl_speed_limit', 0.30)), self.rl_policy)
         self.enable_motion = self.param('enable_motion', False)
         if type(self.enable_motion) is not bool:
             raise ValueError('enable_motion 必须为 true/false')
         self.dog_name = self.param('dog_name', 'mi_desktop_48_b0_2d_7b_03_fd').strip('/')
         self.dog_topic = self.param('dog_pose_topic', '/vrpn/xll_dog/pose')
         self.ball_topic = self.param('ball_pose_topic', '/vrpn/ball/pose')
+        self.opponent_topic = self.param('opponent_pose_topic', '').strip()
+        self.opponent_yaw_offset = float(self.param('opponent_yaw_offset', 0.0))
+        if duel and (not self.opponent_topic or
+                     self.opponent_topic.strip('/') in
+                     (self.dog_topic.strip('/'), self.ball_topic.strip('/'))):
+            raise ValueError('攻防 RL 需要 opponent_pose_topic，且不能与本狗/球话题相同')
+        if not math.isfinite(self.opponent_yaw_offset):
+            raise ValueError('opponent_yaw_offset 必须为有限弧度值')
         # 为空时接受 VRPN 实际发布的 frame_id，并要求所有刚体一致。
         # 需要强制检查时可显式传入 -p world_frame:=world。
         self.world_frame = self.param('world_frame', '')
@@ -86,9 +103,12 @@ class Soccer(Node):
         self.use_mocap_goals = self.param('use_mocap_goals', True)
         self.attack_goal = self.param('attack_goal', 'goal_right')
         self.calibrate_goal = self.param('calibrate_goal', '')
-        # 用户估计约 6m，需现场确认；这是边界判断，不是自动测量值。
-        self.field_width = float(self.param('field_width', 6.0))
-        self.field_end_margin = float(self.param('field_end_margin', 0.6))
+        # 攻防模型使用复赛外场 10 x 5.5 m；单狗保留原默认参数。
+        self.field_width = float(self.param('field_width', 5.5 if duel else 6.0))
+        self.field_end_margin = float(self.param('field_end_margin', .415 if duel else .6))
+        self.field_length = float(self.param('field_length', 10.0))
+        if not math.isfinite(self.field_length) or self.field_length <= 0:
+            raise ValueError('field_length 必须为有限正数')
         self.goal_pose_timeout = float(self.param('goal_pose_timeout', 2.0))
         self.calibration_pose_timeout = float(
             self.param('calibration_pose_timeout', 2.0))
@@ -159,6 +179,11 @@ class Soccer(Node):
                 PoseStamped, self.dog_topic, lambda msg: self.on_pose('dog', msg), self.qos)
         self.ball_sub = self.create_subscription(
             PoseStamped, self.ball_topic, lambda msg: self.on_pose('ball', msg), self.qos)
+        self.opponent_sub = None
+        if duel and not self.calibrate_goal:
+            self.opponent_sub = self.create_subscription(
+                PoseStamped, self.opponent_topic,
+                lambda msg: self.on_pose('opponent', msg), self.qos)
         if self.use_mocap_goals:
             # 用户实测的刚体原点到门线中心偏移，单位米。
             measured_offsets = {
@@ -209,7 +234,9 @@ class Soccer(Node):
             f'狗朝向修正 dog_yaw_offset={self.yaw_offset:.3f}rad')
         if self.control_mode == 'rl':
             self.get_logger().info(
-                f'RL stage2 已加载；平移限速={self.controller.speed_limit:.2f}m/s；'
+                f'RL {self.rl_policy} 已加载（{self.controller.actor.obs_dim} 维）；'
+                f'对手话题={self.opponent_topic if duel else "不使用"}；'
+                f'平移限速={self.controller.speed_limit:.2f}m/s；'
                 'max_kicks 不适用于连续 RL 控制，进球/超时/故障时结束；'
                 f'模式={"实机控制" if self.enable_motion else "只推理、不发运动指令"}')
 
@@ -242,7 +269,9 @@ class Soccer(Node):
             if not all(math.isfinite(v) for v in (p.x, p.y, p.z)):
                 raise ValueError('动捕位置包含无效数值')
             yaw = (wrap_angle(yaw_from_quaternion(q.x, q.y, q.z, q.w) + self.yaw_offset)
-                   if kind == 'dog' else 0.0)
+                   if kind == 'dog' else
+                   (wrap_angle(yaw_from_quaternion(q.x, q.y, q.z, q.w) +
+                               self.opponent_yaw_offset) if kind == 'opponent' else 0.0))
             if kind == 'dog':
                 self.dog_quaternion = (q.x, q.y, q.z, q.w)
             stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
@@ -250,6 +279,8 @@ class Soccer(Node):
                                    yaw, now, frame, stamp)
         except (ValueError, TypeError, AttributeError) as exc:
             setattr(self.controller, kind, None)
+            if self.control_mode == 'rl' and kind in self.controller.tracks:
+                self.controller.tracks[kind].invalidate('invalid_pose')
             self.goal_note = str(exc)
             self.controller.wait_for_pose(str(exc))
             if now - self.last_error_report >= 1.0:
@@ -400,6 +431,10 @@ class Soccer(Node):
             field_min_x=-length/2 - self.field_end_margin,
             field_max_x=length/2 + self.field_end_margin,
             field_min_y=-self.field_width/2, field_max_y=self.field_width/2)
+        if self.control_mode == 'rl' and c.duel:
+            # Outer length is independent of measured goal-line separation.
+            config = config._replace(field_min_x=-self.field_length/2,
+                                     field_max_x=self.field_length/2)
         config.validate()
         c.cfg = config
         c.wait_for_pose('球门已标定，确认狗与球的定位')
@@ -501,6 +536,10 @@ class Soccer(Node):
             d, b = self.controller.dog, self.controller.ball
             positions = (f'dog=({d.x:.2f},{d.y:.2f},{d.yaw:.2f}rad) '
                          f'ball=({b.x:.2f},{b.y:.2f})' if d and b else '等待定位')
+            if self.control_mode == 'rl' and self.controller.duel:
+                o = self.controller.opponent
+                positions += (f' opponent=({o.x:.2f},{o.y:.2f},{o.yaw:.2f}rad)'
+                              f' age={now-o.received:.2f}s' if o else ' opponent=未收到')
             target = self.controller.target_yaw
             heading = (f'；目标朝向={target:.2f}rad，'
                        f'偏差={math.degrees(wrap_angle(target-d.yaw)):.1f}度'
@@ -580,7 +619,7 @@ class Soccer(Node):
                 self.report(now, 'WAIT_POSE', self.pose_wait_reason(now), Controller.ZERO)
             return
         velocity = c.command(now)
-        if c.finished or c.state == 'WAIT_POSE':
+        if c.finished or c.state in ('WAIT_POSE', 'WAIT_REFEREE'):
             self.end_motion()
         else:
             self.publish(velocity)

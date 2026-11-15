@@ -204,7 +204,7 @@ class Controller:
                 before, side_before = self.goal_coordinates(previous.x, previous.y)
                 after, side_after = self.goal_coordinates(x, y)
                 # 以整个球越过门线为准，线性插值定位越线瞬间，避免低帧率漏判。
-                if (self.started_at is not None and self.state != 'WAIT_POSE' and
+                if (self.started_at is not None and self.state not in ('WAIT_POSE', 'WAIT_REFEREE') and
                         self.dog is not None and self.dog.frame == frame and
                         0 <= now - self.dog.received <= c.pose_timeout and
                         0 < dt <= c.pose_timeout and
