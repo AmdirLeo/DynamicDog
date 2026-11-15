@@ -30,6 +30,9 @@ class StandGuard:
         self.response_ok = False
         self.response_code = None
         self.ready_once = False
+        # No multi-frame startup debounce: use one fresh report that passes
+        # the checks below. Missing, stale and fault reports still block motion.
+        self.required_stable_frames = 1
 
     def fail(self, reason):
         """失败锁定，不自动重发站立或恢复行走。"""
@@ -98,17 +101,21 @@ class StandGuard:
             return 'WALK'
         if self.requested_at is not None:
             if (self.response_ok and self._standing()
-                    and self.stable_count >= 3):
+                    and self.stable_count >= self.required_stable_frames):
                 self.ready_once = True
                 self.state = 'READY'
-                self.reason = '站立服务成功，且连续状态确认站稳'
+                self.reason = '站立服务成功，已收到有效站稳状态'
                 return 'WALK'
             self.state = 'STANDING'
-            self.reason = '等待站立服务成功与连续站稳确认'
+            self.reason = ('等待站立服务成功与动作完成：'
+                           f'response_ok={self.response_ok}, motion_id={self.motion_id}, '
+                           f'switch_status={self.switch_status}, progress={self.progress}')
             return 'WAIT'
-        if self.stable_count < 3:
+        if self.stable_count < self.required_stable_frames:
             self.state = 'WAIT_POSTURE'
-            self.reason = '等待姿态正常且连续稳定三帧'
+            self.reason = ('当前状态未满足起步条件：'
+                           f'motion_id={self.motion_id}, switch_status={self.switch_status}, '
+                           f'progress={self.progress}, healthy={self.healthy}')
             return 'WAIT'
         if self._standing() or self.motion_id == self.walk_id:
             self.ready_once = True

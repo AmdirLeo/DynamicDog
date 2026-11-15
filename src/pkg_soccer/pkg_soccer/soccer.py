@@ -491,7 +491,7 @@ class Soccer(Node):
             self.stand_future = None
 
     def posture_allows_motion(self, now):
-        """只请求一次 111 站立；成功且连续反馈站稳后才发送快速步态。"""
+        """只请求一次 111 站立；服务成功并收到有效站稳状态后发送步态。"""
         guard = self.stand_guard
         # 先检查超时，晚到的服务结果不能解除故障锁定。
         guard.command(now)
