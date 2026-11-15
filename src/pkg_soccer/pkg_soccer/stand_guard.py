@@ -40,7 +40,7 @@ class StandGuard:
         self.reason = reason
 
     def _standing(self):
-        return (self.motion_id == 112
+        return (self.motion_id in (102, 112)
                 or self.motion_id == 111 and self.progress >= 96)
 
     def _idle(self):
@@ -74,7 +74,7 @@ class StandGuard:
             return
         if not healthy or switch_status not in (0, 1, 14):
             self.fail('运动状态报告故障或禁止切换，不能自动站立/行走')
-        elif self.ready_once and motion_id not in (111, 112, self.walk_id):
+        elif self.ready_once and motion_id not in (102, 111, 112, self.walk_id):
             self.fail('运行中姿态改变，停止控制且不重新自动站立')
 
     def command(self, now):
