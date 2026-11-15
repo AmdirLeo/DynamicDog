@@ -460,6 +460,7 @@ class Soccer(Node):
     def on_status(self, msg):
         """按运动反馈确认坐/趴/站姿；运行后姿态改变则停止，不再次起身。"""
         guard = self.stand_guard
+        already_failed = guard.state == 'POSTURE_FAILED'
         try:
             healthy = (msg.ori_error == 0 and msg.footpos_error == 0 and
                        len(msg.motor_error) > 0 and
@@ -467,6 +468,13 @@ class Soccer(Node):
                        0 <= msg.order_process_bar <= 100)
             guard.update(msg.motion_id, msg.switch_status, msg.order_process_bar,
                          healthy, time.monotonic())
+            if guard.state == 'POSTURE_FAILED' and not already_failed:
+                # Preserve the triggering frame, even if later reports recover.
+                guard.reason += (
+                    f'；motion_id={msg.motion_id}, switch_status={msg.switch_status}, '
+                    f'ori_error={msg.ori_error}, footpos_error={msg.footpos_error}, '
+                    f'order_process_bar={msg.order_process_bar}, '
+                    f'motor_error={list(msg.motor_error)}')
         except (AttributeError, TypeError, ValueError):
             guard.fail('MotionStatus 字段不兼容')
         if guard.state == 'POSTURE_FAILED':
