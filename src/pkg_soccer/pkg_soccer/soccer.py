@@ -49,14 +49,17 @@ from .stand_guard import StandGuard
 class Soccer(Node):
     """20 Hz 控制；订阅回调仅更新观测，独立单调时钟检查数据有效期。"""
 
-    def __init__(self):
+    def __init__(self, attacker_profile=False):
         super().__init__('soccer')
-        self.control_mode = self.param('control_mode', 'rules')
+        self.attacker_profile = attacker_profile
+        self.control_mode = self.param('control_mode', 'rl' if attacker_profile else 'rules')
         if self.control_mode not in ('rules', 'rl'):
             raise ValueError('control_mode 必须为 rules 或 rl')
-        self.rl_policy = self.param('rl_policy', 'stage2')
+        self.rl_policy = self.param('rl_policy', 'attacker' if attacker_profile else 'stage2')
         if self.rl_policy not in ('stage2', 'attacker', 'defender'):
             raise ValueError('rl_policy 必须为 stage2/attacker/defender')
+        if attacker_profile and (self.control_mode != 'rl' or self.rl_policy != 'attacker'):
+            raise ValueError('attacker 入口固定使用 ATTACK 混合控制；其他模式请使用 soccer 入口')
         duel = self.control_mode == 'rl' and self.rl_policy != 'stage2'
         defaults = Config()
         if duel:
@@ -70,13 +73,14 @@ class Soccer(Node):
             from .rl_control import RLController
             self.controller = RLController(
                 Config(**values), self.param('rl_model_path', ''),
-                float(self.param('rl_speed_limit', 0.30)), self.rl_policy)
+                float(self.fixed_param('rl_speed_limit', .45) if attacker_profile else
+                      self.param('rl_speed_limit', .45)), self.rl_policy)
         self.enable_motion = self.param('enable_motion', False)
         if type(self.enable_motion) is not bool:
             raise ValueError('enable_motion 必须为 true/false')
         self.dog_name = self.param('dog_name', 'mi_desktop_48_b0_2d_7b_03_fd').strip('/')
         self.dog_topic = self.param('dog_pose_topic', '/vrpn/xll_dog/pose')
-        self.ball_topic = self.param('ball_pose_topic', '/vrpn/ball/pose')
+        self.ball_topic = self.fixed_param('ball_pose_topic', '/vrpn/ball/pose')
         self.opponent_topic = self.param('opponent_pose_topic', '').strip()
         self.opponent_yaw_offset = float(self.param('opponent_yaw_offset', 0.0))
         if duel and (not self.opponent_topic or
@@ -85,11 +89,11 @@ class Soccer(Node):
             raise ValueError('攻防 RL 需要 opponent_pose_topic，且不能与本狗/球话题相同')
         if not math.isfinite(self.opponent_yaw_offset):
             raise ValueError('opponent_yaw_offset 必须为有限弧度值')
-        # 为空时接受 VRPN 实际发布的 frame_id，并要求所有刚体一致。
-        # 需要强制检查时可显式传入 -p world_frame:=world。
-        self.world_frame = self.param('world_frame', '')
-        self.position_scale = float(self.param('position_scale', 1.0))
-        self.yaw_offset = float(self.param('dog_yaw_offset', 0.0))
+        # Lock the actual first VRPN frame for this run; do not guess its name.
+        self.world_frame = self.fixed_param('world_frame', '')
+        self.position_scale = float(self.fixed_param('position_scale', 1.0))
+        calibrated_yaw = math.pi if attacker_profile and self.dog_topic == '/vrpn/xll_dog/pose' else 0.
+        self.yaw_offset = float(self.param('dog_yaw_offset', calibrated_yaw))
         self.dog_quaternion = None
         self.posture_timeout = float(self.param('posture_timeout', 1.0))
         self.stand_timeout = float(self.param('stand_timeout', 25.0))
@@ -195,7 +199,7 @@ class Soccer(Node):
                 if len(offset) != 2 or not all(math.isfinite(v) for v in offset):
                     raise ValueError(name + '_offset 应为 [x,y]，单位米')
                 self.goal_offsets[name] = offset
-                topic = self.param(name + '_topic', '/vrpn/' + name + '/pose')
+                topic = self.fixed_param(name + '_topic', '/vrpn/' + name + '/pose')
                 self.goal_subs.append(self.create_subscription(
                     PoseStamped, topic, lambda msg, name=name: self.on_goal(name, msg), self.qos))
         self.status_sub = None
@@ -244,6 +248,13 @@ class Soccer(Node):
         """启动参数只读，避免运行时变更却未实际应用。"""
         return self.declare_parameter(
             name, default, ParameterDescriptor(read_only=True)).value
+
+    def fixed_param(self, name, value):
+        """Attacker shortcut fixes lab settings; legacy soccer remains configurable."""
+        actual = self.param(name, value)
+        if self.attacker_profile and actual != value:
+            raise ValueError(f'attacker 入口固定 {name}={value!r}；请移除该覆盖参数')
+        return actual
 
     def endpoint(self, name):
         """兼容有/无机器狗命名空间的运动接口。"""
@@ -606,7 +617,8 @@ class Soccer(Node):
         if not self.enable_motion:
             if self.control_mode == 'rl':
                 velocity = c.command(now)
-                self.report(now, 'RL_SHADOW' if c.state == 'RL' else c.state,
+                self.report(now, (c.state + '_SHADOW') if c.state in (
+                    'RL', 'ATTACK_RL', 'ATTACK_REPOSITION', 'ATTACK_BLOCKED') else c.state,
                             c.reason + '（只推理，不发运动指令）', velocity)
                 return
             if c.poses_valid(now):
@@ -637,7 +649,7 @@ class Soccer(Node):
                 time.sleep(0.03)
 
 
-def main(args=None):
+def main(args=None, attacker_profile=False):
     """Ctrl+C/SIGTERM 先发结束帧，再销毁节点和 ROS context。"""
     rclpy.init(args=args)
     node = None
@@ -646,7 +658,7 @@ def main(args=None):
     try:
         for signum in (signal.SIGINT, signal.SIGTERM):
             previous[signum] = signal.signal(signum, lambda *_: stopping.set())
-        node = Soccer()
+        node = Soccer(attacker_profile=attacker_profile)
         while rclpy.ok() and not stopping.is_set() and not (
                 node is not None and node.calibration_complete):
             rclpy.spin_once(node, timeout_sec=0.1)
@@ -661,6 +673,11 @@ def main(args=None):
             rclpy.shutdown()
         for signum, handler in previous.items():
             signal.signal(signum, handler)
+
+
+def attacker_main(args=None):
+    """Short competition entry: fixed lab configuration, ATTACK supervisor."""
+    main(args, attacker_profile=True)
 
 
 if __name__ == '__main__':

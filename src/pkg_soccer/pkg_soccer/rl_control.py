@@ -83,6 +83,8 @@ class RLController(Controller):
         self.referee_moved = False
         self.referee_settled = None
         self.deadlock_since = None
+        from .attack import AttackPlanner
+        self.attack_planner = AttackPlanner() if policy == 'attacker' else None
 
     def update(self, kind, x, y, yaw, now, frame, stamp):
         if kind == 'opponent':
@@ -187,6 +189,13 @@ class RLController(Controller):
         co, si = math.cos(c.field_yaw), math.sin(c.field_yaw)
         return co*dx+si*dy, -si*dx+co*dy
 
+    def world_coordinates(self, fx, fy):
+        """Convert field axes (attack direction, lateral) to mocap axes."""
+        c = self.cfg
+        co, si = math.cos(c.field_yaw), math.sin(c.field_yaw)
+        return (c.field_center_x + co*fx - si*fy,
+                c.field_center_y + si*fx + co*fy)
+
     def referee_wait(self, now):
         """Stop for physical referee replacement; never teleport real observations.
 
@@ -215,8 +224,9 @@ class RLController(Controller):
             self.contact_seen = False
         moved = math.hypot(b.x-self.referee_origin[0], b.y-self.referee_origin[1]) > .15
         self.referee_moved |= moved
+        target_distance = math.hypot(bx-self.referee_target[0], by-self.referee_target[1])
         placed = (self.referee_moved and not dead and
-                  math.hypot(bx-self.referee_target[0], by-self.referee_target[1]) < .20 and
+                  target_distance < .50 and
                   self.tracks['ball'].speed < .08)
         self.referee_settled = (now if self.referee_settled is None else
                                 self.referee_settled) if placed else None
@@ -225,9 +235,14 @@ class RLController(Controller):
             self.referee_settled = self.deadlock_since = None
             self.wait_for_pose('重发球已确认，重新确认连续定位')
         else:
+            wx, wy = self.world_coordinates(*self.referee_target)
             self.state = 'WAIT_REFEREE'
             self.reason = ('死区/僵持：等待裁判将球放到最近发球点 '
-                           f'{self.referee_target}（场地坐标，米）')
+                           f'mocap=({wx:.2f},{wy:.2f}) 米（与 ball 日志同坐标系）；'
+                           f'当前偏差={target_distance:.2f}m，要求<0.50m；'
+                           f'球速={self.tracks["ball"].speed:.2f}m/s，要求<0.08m/s 持续0.5s；'
+                           f'球场坐标=({self.referee_target[0]:.2f},'
+                           f'{self.referee_target[1]:.2f})')
         return True
 
     def _command(self, now):
@@ -241,6 +256,8 @@ class RLController(Controller):
             missing = [name for name, track in self.tracks.items() if not track.valid(now)]
             self.wait_for_pose('RL 等待同坐标系连续有效位姿、速度：' + ', '.join(missing))
             self.deadlock_since = None
+            if self.attack_planner:
+                self.attack_planner.reset()
             return self.ZERO
         if self.scored:
             self.state, self.reason = 'GOAL', '球已从场内越过球门线，进球'
@@ -259,6 +276,8 @@ class RLController(Controller):
                 self.stop('球已越过本方门线，请确认结果并重新摆球')
                 return self.ZERO
         if self.duel and self.referee_wait(now):
+            if self.attack_planner:
+                self.attack_planner.reset()
             return self.ZERO
         if self.state == 'WAIT_POSE':
             pair = (d.sequence, b.sequence)
@@ -274,6 +293,17 @@ class RLController(Controller):
         self.distance = math.hypot(b.x-d.x, b.y-d.y)
         self.contact_seen |= self.distance < .43
         velocity = action*self.actor.scale
+        mode, reason = 'RL', 'PPO ' + self.policy + ' 策略控制'
+        if self.attack_planner:
+            override = self.attack_planner.command(self, now)
+            if override is not None:
+                velocity = np.asarray(override, dtype=np.float32)
+            mode, reason = self.attack_planner.state, self.attack_planner.reason
+            velocity = self.attack_planner.limit_contact(self, velocity)
+        # Rules and RL share the same body-axis envelope and total speed cap.
+        velocity = np.asarray(velocity, dtype=np.float32)
+        axis_ratio = max(1., abs(velocity[0])/.45, abs(velocity[1])/.20)
+        velocity[:2] /= axis_ratio
         speed = float(np.linalg.norm(velocity[:2]))
         if speed > self.speed_limit:
             velocity[:2] *= self.speed_limit/speed
@@ -285,6 +315,6 @@ class RLController(Controller):
             if not self.inside_field(d.x+float(vx)*.5, d.y+float(vy)*.5):
                 self.stop('RL 预计运动将越过场地边界')
                 return self.ZERO
-        self.state, self.reason = 'RL', ('PPO ' + self.policy + ' 策略控制')
+        self.state, self.reason = mode, reason
         self.target_yaw = None  # PPO outputs angular velocity, not a target heading.
         return tuple(float(v) for v in velocity)

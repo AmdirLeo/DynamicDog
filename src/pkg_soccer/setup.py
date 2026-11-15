@@ -21,6 +21,7 @@ setup(
     license='Apache-2.0',
     entry_points={'console_scripts': [
         'soccer = pkg_soccer.soccer:main',
+        'attacker = pkg_soccer.soccer:attacker_main',
         'record_motion = pkg_soccer.record_motion:main',
     ]},
 )
