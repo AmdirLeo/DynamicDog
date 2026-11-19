@@ -3,6 +3,10 @@
 纯 Python，所有位置使用 Z-up 世界坐标（米），速度使用机身坐标。
 只规划狗与球的相对运动；场地应空旷，不包含其他机器人/障碍物避让。
 KICK 使用可配置的 303/305 步态前冲触球，不假定存在专用抬腿动作编号。
+
+比赛循环（按复赛规则）：进球、球出界、球停在门线后都不再是终态，而是进入
+`WAIT_PLAY` 暂停等裁判；球被放回任意发球点并静止、狗也静止后 `rearm()` 重新
+开始一整轮。只有人工停止、姿态故障和超时才让 `finished` 为真。
 """
 
 import math
@@ -33,7 +37,7 @@ class Config(NamedTuple):
     ball_radius: float = 0.12
     pose_timeout: float = 0.5
     sync_tolerance: float = 0.15
-    approach_speed: float = 0.45
+    approach_speed: float = 0.70   # 走位速度（2026-11-17 提速：0.45 → 0.70）
     turn_speed: float = 0.7
     turn_response_grace: float = 1.0  # 起转/换向后等待步态和通信响应，再检查方向。
     angle_tolerance: float = 0.25
@@ -44,15 +48,24 @@ class Config(NamedTuple):
     follow_distance: float = 0.32
     kick_distance: float = 0.38  # 球心到狗刚体原点，需现场标定。
     min_distance: float = 0.20
-    kick_speed: float = 0.55
+    kick_speed: float = 0.90   # 触球前的推进速度（2026-11-17 提速：0.55 → 0.90）
     kick_duration: float = 0.8
     kick_travel: float = 0.20
     ball_move_distance: float = 0.15
     settle_time: float = 0.5
     ball_still_speed: float = 0.08
     assess_time: float = 1.5
-    max_run_time: float = 120.0
-    max_kicks: int = 8
+    # 发球点（规则里的十字标记）：以场地中心为原点的 3x3 网格，含开球点。
+    # 坐标与训练端 train/obs.py::SERVICE_POINTS 完全一致（±2.5, ±1.25）。
+    # 球回到任一发球点并静止即认为裁判已发球，比赛继续。
+    service_point_x: float = 2.5
+    service_point_y: float = 1.25
+    service_point_tolerance: float = 0.40
+    resume_settle_time: float = 0.40   # 球在发球点静止多久才放行
+    resume_timeout: float = 25.0       # 兜底：暂停过久且球已静止在场内就放行
+    resume_dog_speed: float = 0.15     # 裁判还在搬运时不要恢复（m/s）
+    max_run_time: float = 600.0        # 复赛半场 4min，留足余量
+    max_kicks: int = 200
     field_min_x: float = -3.0
     field_max_x: float = 3.0
     field_min_y: float = -2.0
@@ -74,8 +87,8 @@ class Config(NamedTuple):
                 self.behind_distance <= 1.5):
             raise ValueError('需要 min_distance < kick_distance < '
                              'ball_clearance < behind_distance <= 1.5')
-        if self.approach_speed > 0.8 or self.kick_speed > 0.8:
-            raise ValueError('前进和触球速度不能大于 0.8 m/s')
+        if self.approach_speed > 1.0 or self.kick_speed > 1.2:
+            raise ValueError('approach_speed <= 1.0，kick_speed <= 1.2 m/s（协议上限 1.5）')
         if self.turn_speed > 1.0 or self.angle_tolerance > 0.5:
             raise ValueError('turn_speed <= 1.0，angle_tolerance <= 0.5')
         if self.turn_response_grace > 2.0:
@@ -97,6 +110,8 @@ class Config(NamedTuple):
             raise ValueError('球门中心必须位于设定的场地范围内')
         if self.position_tolerance >= self.behind_distance - self.ball_clearance:
             raise ValueError('position_tolerance 太大，无法稳定进入球后位置')
+        if self.resume_settle_time > self.resume_timeout:
+            raise ValueError('resume_settle_time 不能大于 resume_timeout')
 
 
 class Pose(NamedTuple):
@@ -131,9 +146,15 @@ class Controller:
         self.kick_yaw = None
         self.assess_at = None
         self.kicks = 0
+        self.goals = 0
         self.distance = None
         self.ball_speed = math.inf
+        self.dog_speed = math.inf
         self.ball_velocity = (0.0, 0.0)
+        self.paused = False
+        self.pause_since = None
+        self.service_since = None
+        self.resumes = 0
         self.confirmed = 0
         self.confirm_pair = (0, 0)
         self.sequence = 0
@@ -166,6 +187,95 @@ class Controller:
         self.settle_at = None
         self.route_side = None
 
+    def service_points(self):
+        """规则里的发球点：以场地中心为原点的 3x3 网格（含开球点）。
+
+        与训练端 `train/obs.py::SERVICE_POINTS`（±2.5, ±1.25）一致；
+        坐标按场地朝向旋转到世界系。
+        """
+        c = self.cfg
+        co, si = math.cos(c.field_yaw), math.sin(c.field_yaw)
+        points = []
+        for fx in (-c.service_point_x, 0.0, c.service_point_x):
+            for fy in (-c.service_point_y, 0.0, c.service_point_y):
+                points.append((c.field_center_x + fx*co - fy*si,
+                               c.field_center_y + fx*si + fy*co))
+        return tuple(points)
+
+    def ball_at_service_point(self, x, y, tolerance=None):
+        """球是否已被放到某个发球点附近。"""
+        tol = (self.cfg.service_point_tolerance
+               if tolerance is None else tolerance)
+        return any(math.hypot(x - px, y - py) <= tol
+                   for px, py in self.service_points())
+
+    def pause_play(self, now, reason):
+        """进球/出界/死区：停车等裁判发球，不结束比赛。"""
+        if self.finished:
+            return
+        self.paused = True
+        self.state, self.reason = 'WAIT_PLAY', reason
+        if self.pause_since is None:
+            self.pause_since = now
+        self.confirmed = 0
+        self.settle_at = None
+        self.route_side = None
+
+    def _resume_ready(self, now):
+        """球回到发球点并静止、狗也静止后，允许恢复比赛。"""
+        c, b, d = self.cfg, self.ball, self.dog
+        if b is None or d is None or not b.frame or b.frame != d.frame:
+            self.service_since = None
+            return False
+        if not (0 <= now - b.received <= c.pose_timeout and
+                0 <= now - d.received <= c.pose_timeout):
+            self.service_since = None
+            return False
+        if not self.inside_field(b.x, b.y):
+            self.service_since = None
+            return False
+        if self.ball_speed > c.ball_still_speed or self.dog_speed > c.resume_dog_speed:
+            self.service_since = None
+            return False
+        # 兜底：暂停过久且球已静止在场内（裁判漏放或球自己滚回来），别再干等。
+        if self.pause_since is not None and now - self.pause_since >= c.resume_timeout:
+            return True
+        if not self.ball_at_service_point(b.x, b.y):
+            self.service_since = None
+            return False
+        if self.service_since is None:
+            self.service_since = now
+        return now - self.service_since >= c.resume_settle_time
+
+    def rearm(self, now, reason):
+        """裁判发球完成：重新开始一整轮，不结束比赛。"""
+        self.paused = False
+        self.pause_since = None
+        self.service_since = None
+        self.state = 'WAIT_POSE'
+        self.reason = reason
+        self.scored = False
+        self.kicks = 0
+        self.confirmed = 0
+        self.confirm_pair = (0, 0)
+        self.started_at = now
+        self.settle_at = None
+        self.kick_at = None
+        self.kick_origin = None
+        self.ball_origin = None
+        self.kick_yaw = None
+        self.assess_at = None
+        self.route_side = None
+        self.target_yaw = None
+        self.turn_started = None
+        self.turn_checkpoint = None
+        self.turn_checkpoint_yaw = None
+        self.turn_sign = None
+        self.turn_origin = None
+        self.turn_response_until = None
+        self.distance = None
+        self.resumes += 1
+
     def goal_coordinates(self, x, y):
         """返回距球门线的有符号距离及沿门线的横向位置。"""
         c = self.cfg
@@ -193,6 +303,15 @@ class Controller:
                 stamp = previous.stamp
         self.sequence += 1
         pose = Pose(x, y, yaw, now, frame, stamp, self.sequence)
+        if kind == 'dog':
+            # 只用于判断"裁判是否还在搬狗"；不影响规划。
+            self.dog_speed = math.inf
+            if previous is not None and not gap and previous.frame == frame:
+                source_dt = stamp - previous.stamp
+                dt = source_dt if source_dt > 0 else now - previous.received
+                if dt > 0:
+                    self.dog_speed = math.hypot(x - previous.x,
+                                                y - previous.y) / dt
         if kind == 'ball':
             self.ball_speed = math.inf
             if previous is not None and not gap and previous.frame == frame:
@@ -204,7 +323,8 @@ class Controller:
                 before, side_before = self.goal_coordinates(previous.x, previous.y)
                 after, side_after = self.goal_coordinates(x, y)
                 # 以整个球越过门线为准，线性插值定位越线瞬间，避免低帧率漏判。
-                if (self.started_at is not None and self.state not in ('WAIT_POSE', 'WAIT_REFEREE') and
+                if (self.started_at is not None and not self.paused and
+                        self.state not in ('WAIT_POSE', 'WAIT_PLAY', 'WAIT_REFEREE') and
                         self.dog is not None and self.dog.frame == frame and
                         0 <= now - self.dog.received <= c.pose_timeout and
                         0 < dt <= c.pose_timeout and
@@ -348,6 +468,12 @@ class Controller:
         c = self.cfg
         if self.finished:
             return self.ZERO
+        if self.paused:
+            if self._resume_ready(now):
+                self.rearm(now, '球已回到发球点，重新开始比赛')
+            else:
+                self.state = 'WAIT_PLAY'
+            return self.ZERO
         if self.started_at is not None and now - self.started_at >= c.max_run_time:
             self.stop('任务达到时间上限')
             return self.ZERO
@@ -356,13 +482,17 @@ class Controller:
             return self.ZERO
         d, b = self.dog, self.ball
         if self.scored:
-            self.state, self.reason = 'GOAL', '球已从场内越过球门线，进球'
+            self.goals += 1
+            self.pause_play(now, f'进球（本场第 {self.goals} 个），等待裁判发球')
             return self.ZERO
-        if not self.inside_field(d.x, d.y) or not self.inside_field(b.x, b.y):
-            self.stop('狗或球已超出设定场地')
+        if not self.inside_field(d.x, d.y):
+            self.stop('狗已超出设定场地')
+            return self.ZERO
+        if not self.inside_field(b.x, b.y):
+            self.pause_play(now, '球已出界，等待裁判就近发球')
             return self.ZERO
         if self.goal_coordinates(b.x, b.y)[0] >= c.ball_radius:
-            self.stop('球在球门线后且未确认进球，请重新摆球')
+            self.pause_play(now, '球在球门线后，等待裁判发球')
             return self.ZERO
         if self.state == 'WAIT_POSE':
             pair = (d.sequence, b.sequence)

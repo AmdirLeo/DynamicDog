@@ -1,0 +1,17 @@
+{
+  "obs_dim": 41,
+  "role": "attacker",
+  "action_scale": [
+    0.45,
+    0.2,
+    0.7
+  ],
+  "speed_limit": 0.5,
+  "speed_scale": 1.0,
+  "dash": true,
+  "dash_speed": 1.5,
+  "dash_ms": 450,
+  "dash_cooldown": 1.2,
+  "seed": 0,
+  "steps": 300000
+}

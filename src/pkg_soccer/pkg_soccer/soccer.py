@@ -1,32 +1,57 @@
-"""ROS 2 动捕足球节点。
+"""ROS 2 动捕足球节点（复赛 2v2 主程序）。
 
-前置条件（No4 课件）：FZMotion 导出选 Z-up；狗刚体局部 +X 应与狗头一致；
-启动 vrpn_listener，确认两刚体发布 geometry_msgs/PoseStamped，单位为米。
+最少参数（只保留狗名、四条狗的位置话题、进攻方向）：
+    ros2 run pkg_soccer soccer --ros-args \
+      -p dog_name:=<本狗运动接口命名空间> \
+      -p dog_pose_topic:=/vrpn/dog1/pose \
+      -p teammate_pose_topic:=/vrpn/dog2/pose \
+      -p opponent1_pose_topic:=/vrpn/opp1/pose \
+      -p opponent2_pose_topic:=/vrpn/opp2/pose \
+      -p attack_goal:=goal_right
+
+1v1（去掉 teammate/opponent2 两个话题即可，队友与次近对手槽位填 0）：
+    ... -p opponent1_pose_topic:=/vrpn/opp1/pose -p attack_goal:=goal_right
+单狗（没有对手刚体）：-p rl_policy:=stage2，或 -p control_mode:=rules。
+
+默认值（通常都不用传）：
+    control_mode=rl、rl_policy=attacker、enable_motion=true、
+    use_mocap_goals=false（场地与球门按尺寸直接算，不需要门刚体）、
+    ball_pose_topic=/vrpn/ball/pose、field_length=10、field_width=5.5、
+    goal_width=1.5、goal_line_inset=0.415、max_run_time=600、max_kicks=200、
+    approach_speed=0.70、kick_speed=0.90、kick_max_speed=1.5、kick_max_ms=450。
+    只观察不动：-p enable_motion:=false。
+
+比赛循环（按复赛规则 3.4 / 4.2 / 4.4）：
+  - 进球（整球越过门线且在门宽内）→ 记一分并暂停，等裁判把球放回发球点；
+  - 球出界、停在门线后、进死区、双方僵持 8 s → 同样暂停等裁判；
+  - 球被放到任意发球点（3x3 网格，含开球点）静止 0.4 s、狗也静止后，
+    自动 rearm 继续比赛，不需要重启程序，也不消耗 max_run_time 预算；
+  - 只有姿态故障、狗离开场地、超时（600 s）和人工 Ctrl+C 才真正结束。
+
 启用运动后，启动时坐/趴会请求一次站立并等待站稳；停止其他运动控制节点。
+前置条件（No4 课件）：FZMotion 导出选 Z-up；狗刚体局部 +X 应与狗头一致；
+启动 vrpn_listener，确认各刚体发布 geometry_msgs/PoseStamped，单位为米。
 初始朝向可以任意；刚体朝向与狗头不一致时用 dog_yaw_offset（弧度）修正。
 
-编译、只观察：
-    colcon build --packages-select pkg_soccer
-    source install/setup.bash
-    ros2 run pkg_soccer soccer
+需要门刚体定位时（可选，默认关闭）：
+    -p use_mocap_goals:=true -p goal_left_topic:=/vrpn/goal_left/pose \
+    -p goal_right_topic:=/vrpn/goal_right/pose
+当时以两门刚体自动建场；门宽用卷尺测两门柱内侧净距离；
+goal_left/right_offset 是各自刚体坐标系内原点到门线中心的 [x,y] 米偏移；
+门中心偏移标定：把 ball 刚体原点放到该门门线中心，再以
+    ros2 run pkg_soccer soccer --ros-args -p calibrate_goal:=goal_left \
+      -p use_mocap_goals:=true -p enable_motion:=false
+启动自动采样；稳定约 1 秒后打印结果并退出，换另一门重复。
+field_end_margin 只在门刚体模式下生效（门线后允许活动的距离）。
 
-现场标定后启用（球门净宽和场地宽度为示例，请实际测量）：
-    ros2 run pkg_soccer soccer --ros-args -p enable_motion:=true \
-      -p attack_goal:=goal_right -p goal_width:=1.53 -p field_width:=6.0 \
-      -p walk_motion_id:=305
-
-默认使用两个球门刚体定位，球门须正对；进攻方向为本方门中心到对方门中心。
-goal_left/right_offset 是各自刚体坐标系内原点到门线中心的 [x,y] 米偏移。
-门宽用卷尺测两门柱内侧净距离；场地宽度为两侧边线间距，场地居中于两门。
-门中心偏移标定：将 ball 刚体的原点放到该球门门线中心，再以
-    ros2 run pkg_soccer soccer --ros-args -p calibrate_goal:=goal_left
-启动自动采样；可以离开终端去摆球，稳定约 1 秒后程序会自动打印结果并退出。
-换到另一球门重复，运行时传入两个偏移。若 ball 刚体原点就在球心，
-只需将球放在门线中点；高度不影响平面标定。
-球门/场地原点和角度由动捕自动获得，field_end_margin 是门线后允许活动的距离。
-use_mocap_goals:=false 时可手工指定 goal_x/y/yaw 和 field_* 坐标参数。
-狗刚体名称和运动接口 dog_name 是两件事，分别配置。
-参数只在启动时读取；位置安装偏置、球半径、kick_distance 须现场标定。
+踢球方式：只有"全力推球"（push）。控制器进入 KICK 时锁定方向，直接用
+    kick_max_speed（默认 1.5 m/s，协议 vel_des 上限）× kick_max_ms（默认 450 ms）
+    冲上去把球推出去；不切位控、不抬腿、步高不变。速度靠下面两个参数调：
+    -p approach_speed:=0.70   # 平时走位速度
+    -p kick_speed:=0.90       # 触球前的推进速度
+    （跑步机/台架想空跑不推球时加 -p kick_dry_run:=true，只打印不发动指令）
+    kick_distance 是球心到狗刚体原点；位置安装偏置、球半径须现场标定。
+    参数只在启动时读取。
 """
 
 import math
@@ -49,54 +74,99 @@ from .stand_guard import StandGuard
 class Soccer(Node):
     """20 Hz 控制；订阅回调仅更新观测，独立单调时钟检查数据有效期。"""
 
-    def __init__(self, attacker_profile=False):
+    def __init__(self):
         super().__init__('soccer')
-        self.attacker_profile = attacker_profile
-        self.control_mode = self.param('control_mode', 'rl' if attacker_profile else 'rules')
+        self.control_mode = self.param('control_mode', 'rl')
         if self.control_mode not in ('rules', 'rl'):
             raise ValueError('control_mode 必须为 rules 或 rl')
-        self.rl_policy = self.param('rl_policy', 'attacker' if attacker_profile else 'stage2')
+        self.rl_policy = self.param('rl_policy', 'attacker')
         if self.rl_policy not in ('stage2', 'attacker', 'defender'):
             raise ValueError('rl_policy 必须为 stage2/attacker/defender')
-        if attacker_profile and (self.control_mode != 'rl' or self.rl_policy != 'attacker'):
-            raise ValueError('attacker 入口固定使用 ATTACK 混合控制；其他模式请使用 soccer 入口')
         duel = self.control_mode == 'rl' and self.rl_policy != 'stage2'
         defaults = Config()
         if duel:
             defaults = defaults._replace(goal_x=4.585, goal_width=1.5,
                                          field_min_x=-5., field_max_x=5.,
                                          field_min_y=-2.75, field_max_y=2.75)
+        # 场地与进攻方向：默认不用门刚体，直接按尺寸算，少传参数。
+        self.use_mocap_goals = self.param('use_mocap_goals', False)
+        self.attack_goal = self.param('attack_goal', 'goal_right')
+        self.field_length = float(self.param('field_length', 10.0))
+        self.field_width = float(self.param('field_width', 5.5))
+        self.field_end_margin = float(self.param('field_end_margin', .415))
+        self.goal_line_inset = float(self.param('goal_line_inset', .415))
+        if (type(self.use_mocap_goals) is not bool or
+                self.attack_goal not in ('goal_left', 'goal_right')):
+            raise ValueError('attack_goal 为 goal_left/goal_right；use_mocap_goals 为布尔值')
+        if not math.isfinite(self.field_length) or self.field_length <= 0:
+            raise ValueError('field_length 必须为有限正数')
+        if not math.isfinite(self.field_width) or self.field_width <= 0:
+            raise ValueError('field_width 必须为有限正数')
+        if not (math.isfinite(self.goal_line_inset) and
+                0 < self.goal_line_inset < self.field_length / 2):
+            raise ValueError('goal_line_inset 必须在 (0, field_length/2) 内')
         values = {name: self.param(name, default)
                   for name, default in defaults._asdict().items()}
+        if not self.use_mocap_goals:
+            values = self.static_field(values)
         self.controller = Controller(Config(**values))
         if self.control_mode == 'rl':
             from .rl_control import RLController
             self.controller = RLController(
                 Config(**values), self.param('rl_model_path', ''),
-                float(self.fixed_param('rl_speed_limit', .45) if attacker_profile else
-                      self.param('rl_speed_limit', .45)), self.rl_policy)
-        self.enable_motion = self.param('enable_motion', False)
+                float(self.param('rl_speed_limit', 0.0)), self.rl_policy,
+                dash=bool(self.param('rl_dash', False)),
+                dash_speed=float(self.param('rl_dash_speed', 1.5)),
+                dash_ms=int(self.param('rl_dash_ms', 450)),
+                dash_cooldown=float(self.param('rl_dash_cooldown', 1.2)),
+                # 默认 0.9 rad（约 52°）：短冲只在"朝对方球门"的锥内触发。
+                # 之前默认 0 = 不限方向，是"把球捅向边线/自家门"的直接来源
+                # （train/README.md §17：sp_e 有 40% 的推球是朝自家门方向）。
+                dash_goal_cone=float(self.param('rl_dash_goal_cone', 0.9)))
+        self.enable_motion = self.param('enable_motion', True)
         if type(self.enable_motion) is not bool:
             raise ValueError('enable_motion 必须为 true/false')
         self.dog_name = self.param('dog_name', 'mi_desktop_48_b0_2d_7b_03_fd').strip('/')
         self.dog_topic = self.param('dog_pose_topic', '/vrpn/xll_dog/pose')
-        self.ball_topic = self.fixed_param('ball_pose_topic', '/vrpn/ball/pose')
+        self.ball_topic = self.param('ball_pose_topic', '/vrpn/ball/pose')
+        # 2v2：队友 + 两个对手；旧的 opponent_pose_topic 继续兼容 1v1。
+        self.teammate_topic = self.param('teammate_pose_topic', '').strip()
+        self.opponent1_topic = self.param('opponent1_pose_topic', '').strip()
+        self.opponent2_topic = self.param('opponent2_pose_topic', '').strip()
         self.opponent_topic = self.param('opponent_pose_topic', '').strip()
         self.opponent_yaw_offset = float(self.param('opponent_yaw_offset', 0.0))
-        if duel and (not self.opponent_topic or
-                     self.opponent_topic.strip('/') in
-                     (self.dog_topic.strip('/'), self.ball_topic.strip('/'))):
-            raise ValueError('攻防 RL 需要 opponent_pose_topic，且不能与本狗/球话题相同')
+        self.teammate_yaw_offset = float(self.param('teammate_yaw_offset', 0.0))
         if not math.isfinite(self.opponent_yaw_offset):
             raise ValueError('opponent_yaw_offset 必须为有限弧度值')
-        # Lock the actual first VRPN frame for this run; do not guess its name.
-        self.world_frame = self.fixed_param('world_frame', '')
-        self.position_scale = float(self.fixed_param('position_scale', 1.0))
-        # The rebuilt xll rigid body has +X aligned with the dog's head.
-        # Keep the default unrotated; a field-specific override remains
-        # available for a future rigid-body remount.
+        if not math.isfinite(self.teammate_yaw_offset):
+            raise ValueError('teammate_yaw_offset 必须为有限弧度值')
+        self.topics = {
+            'dog': self.dog_topic,
+            'ball': self.ball_topic,
+            'teammate': self.teammate_topic,
+            'opponent': self.opponent_topic,
+            'opponent1': self.opponent1_topic,
+            'opponent2': self.opponent2_topic,
+        }
+        named = [t.strip('/') for t in self.topics.values() if t]
+        if len(named) != len(set(named)):
+            raise ValueError('狗/球/队友/对手话题不能重复：' + ', '.join(named))
+        self.opponent_topics = [t for t in (self.opponent_topic,
+                                            self.opponent1_topic,
+                                            self.opponent2_topic) if t]
+        if duel and not self.opponent_topics:
+            raise ValueError('攻防 RL 至少需要一个对手话题：opponent_pose_topic '
+                             '或 opponent1/opponent2_pose_topic')
+        # 为空时接受 VRPN 实际发布的 frame_id，并要求所有刚体一致。
+        # 需要强制检查时可显式传入 -p world_frame:=world。
+        self.world_frame = self.param('world_frame', '')
+        self.position_scale = float(self.param('position_scale', 1.0))
         self.yaw_offset = float(self.param('dog_yaw_offset', 0.0))
         self.dog_quaternion = None
+        # 队友/对手位姿（2v2）：用于最近对手观测、日志和 8 s 僵持判定。
+        self.bodies = {'teammate': None, 'opponent': None,
+                       'opponent1': None, 'opponent2': None}
+        self.body_sequence = 0
         self.posture_timeout = float(self.param('posture_timeout', 1.0))
         self.stand_timeout = float(self.param('stand_timeout', 25.0))
         self.walk_motion_id = int(self.param('walk_motion_id', 305))
@@ -106,15 +176,22 @@ class Soccer(Node):
                                       self.stand_timeout)
         self.stand_client = None
         self.stand_future = None
-        self.use_mocap_goals = self.param('use_mocap_goals', True)
-        self.attack_goal = self.param('attack_goal', 'goal_right')
+        # 踢球方式：push = 全力推球（最大速度短脉冲）；leg = 单腿位控；gait = 305 摆动腿
+        # 只保留"全力推球"：不换姿态、不抬腿，进入 KICK 时锁定方向给最大速度。
+        self.kick_dry_run = self.param('kick_dry_run', False)
+        if type(self.kick_dry_run) is not bool:
+            raise ValueError('kick_dry_run 必须为 true/false')
+        self.walk_step_height = float(self.param('walk_step_height', 0.05))
+        self.kick_max_speed = float(self.param('kick_max_speed', 1.5))
+        self.kick_max_ms = int(self.param('kick_max_ms', 450))
+        if not math.isfinite(self.kick_max_speed) or not 0.1 <= self.kick_max_speed <= 1.5:
+            raise ValueError('kick_max_speed 必须在 [0.1, 1.5] m/s（协议 vel_des 上限 1.5）')
+        if not 50 <= self.kick_max_ms <= 2000:
+            raise ValueError('kick_max_ms 必须在 [50, 2000] ms')
+        self.push_burst_until = None
+        self.push_direction = None
+        self.push_done = False
         self.calibrate_goal = self.param('calibrate_goal', '')
-        # 攻防模型使用复赛外场 10 x 5.5 m；单狗保留原默认参数。
-        self.field_width = float(self.param('field_width', 5.5 if duel else 6.0))
-        self.field_end_margin = float(self.param('field_end_margin', .415 if duel else .6))
-        self.field_length = float(self.param('field_length', 10.0))
-        if not math.isfinite(self.field_length) or self.field_length <= 0:
-            raise ValueError('field_length 必须为有限正数')
         self.goal_pose_timeout = float(self.param('goal_pose_timeout', 2.0))
         self.calibration_pose_timeout = float(
             self.param('calibration_pose_timeout', 2.0))
@@ -124,14 +201,12 @@ class Soccer(Node):
             self.param('calibration_min_samples', 12))
         self.calibration_spread = float(
             self.param('calibration_spread', 0.05))
-        if (type(self.use_mocap_goals) is not bool or
-                self.attack_goal not in ('goal_left', 'goal_right')):
-            raise ValueError('attack_goal 为 goal_left/goal_right；use_mocap_goals 为布尔值')
         if self.calibrate_goal not in ('', 'goal_left', 'goal_right'):
             raise ValueError('calibrate_goal 为 goal_left/goal_right 或空字符串')
         if self.calibrate_goal and (self.enable_motion or not self.use_mocap_goals):
-            raise ValueError('门中心标定需要动捕球门且 enable_motion=false')
-        if not (math.isfinite(self.field_width) and self.field_width > values['goal_width'] and
+            raise ValueError('门中心标定需要：-p use_mocap_goals:=true '
+                             '-p enable_motion:=false -p calibrate_goal:=goal_left|goal_right')
+        if not (self.field_width > values['goal_width'] and
                 math.isfinite(self.field_end_margin) and self.field_end_margin > 0):
             raise ValueError('field_width 必须大于 goal_width，field_end_margin 必须为正数')
         if not math.isfinite(self.goal_pose_timeout) or self.goal_pose_timeout <= 0:
@@ -185,11 +260,14 @@ class Soccer(Node):
                 PoseStamped, self.dog_topic, lambda msg: self.on_pose('dog', msg), self.qos)
         self.ball_sub = self.create_subscription(
             PoseStamped, self.ball_topic, lambda msg: self.on_pose('ball', msg), self.qos)
-        self.opponent_sub = None
-        if duel and not self.calibrate_goal:
-            self.opponent_sub = self.create_subscription(
-                PoseStamped, self.opponent_topic,
-                lambda msg: self.on_pose('opponent', msg), self.qos)
+        self.body_subs = []
+        if not self.calibrate_goal:
+            for kind in ('teammate', 'opponent', 'opponent1', 'opponent2'):
+                topic = self.topics[kind]
+                if topic:
+                    self.body_subs.append(self.create_subscription(
+                        PoseStamped, topic,
+                        lambda msg, k=kind: self.on_body(k, msg), self.qos))
         if self.use_mocap_goals:
             # 用户实测的刚体原点到门线中心偏移，单位米。
             measured_offsets = {
@@ -201,7 +279,7 @@ class Soccer(Node):
                 if len(offset) != 2 or not all(math.isfinite(v) for v in offset):
                     raise ValueError(name + '_offset 应为 [x,y]，单位米')
                 self.goal_offsets[name] = offset
-                topic = self.fixed_param(name + '_topic', '/vrpn/' + name + '/pose')
+                topic = self.param(name + '_topic', '/vrpn/' + name + '/pose')
                 self.goal_subs.append(self.create_subscription(
                     PoseStamped, topic, lambda msg, name=name: self.on_goal(name, msg), self.qos))
         self.status_sub = None
@@ -233,30 +311,104 @@ class Soccer(Node):
                 '已有偏移会应用于门中心定位；确认后以 enable_motion:=true 重启。')
         if self.use_mocap_goals:
             self.get_logger().info(f'采用球门偏移（米）：{self.goal_offsets}')
+        else:
+            cfg = self.controller.cfg
+            points = ', '.join(f'({x:.2f},{y:.2f})'
+                               for x, y in self.controller.service_points())
+            self.get_logger().info(
+                f'球场（按尺寸，不用门刚体）：{self.field_length:.2f}m x '
+                f'{self.field_width:.2f}m；门线 x=±{self.field_length/2 - self.goal_line_inset:.3f}，'
+                f'门宽={cfg.goal_width:.2f}m；进攻方向={self.attack_goal}'
+                f'（goal_yaw={cfg.goal_yaw:.2f}rad）；发球点={points}'
+                f'（容差 {cfg.service_point_tolerance:.2f}m）')
         self.get_logger().info(
-            f'速度上限：行走={self.controller.cfg.approach_speed:.2f}m/s，'
-            f'触球={self.controller.cfg.kick_speed:.2f}m/s；'
+            f'比赛循环：进球/球出界/死区/僵持 → 暂停等裁判，球回到任一发球点并静止 '
+            f'{self.controller.cfg.resume_settle_time:.1f}s、狗也静止后自动继续；'
+            f'单轮时间上限 {self.controller.cfg.max_run_time:.0f}s，'
+            f'射门次数上限 {self.controller.cfg.max_kicks}')
+        self.get_logger().info(
+            f'速度：行走={self.controller.cfg.approach_speed:.2f}m/s，'
+            f'触球={self.controller.cfg.kick_speed:.2f}m/s，'
+            f'推球脉冲={self.kick_max_speed:.2f}m/s×{self.kick_max_ms}ms'
+            f'{"（dry-run，不发指令）" if self.kick_dry_run else ""}；'
             f'步态 motion_id={self.walk_motion_id}；'
             f'狗朝向修正 dog_yaw_offset={self.yaw_offset:.3f}rad')
+        self.get_logger().info(
+            '踢球方式=push（全力推球）：进入 KICK 后锁定方向给最大速度，'
+            '步高不变、不切位控、无腿部动作')
         if self.control_mode == 'rl':
+            actor = self.controller.actor
+            layout = {23: '单狗', 29: '1v1', 41: '2v2'}.get(actor.obs_dim, '未知')
+            scale = tuple(float(v) for v in actor.scale)
             self.get_logger().info(
-                f'RL {self.rl_policy} 已加载（{self.controller.actor.obs_dim} 维）；'
-                f'对手话题={self.opponent_topic if duel else "不使用"}；'
+                f'RL {self.rl_policy} 已加载（{actor.obs_dim} 维 / {layout}）；'
+                f'动作缩放={scale} m/s（权重自带档位）；'
+                f'对手话题={self.opponent_topics if duel else "不使用"}；'
+                f'队友话题={self.teammate_topic or "不使用"}；'
+                f'8s 僵持判定看全部队友/对手刚体；'
                 f'平移限速={self.controller.speed_limit:.2f}m/s；'
-                'max_kicks 不适用于连续 RL 控制，进球/超时/故障时结束；'
+                '进球/发球后自动继续，只有超时与故障才结束；'
                 f'模式={"实机控制" if self.enable_motion else "只推理、不发运动指令"}')
+            if self.controller.dash_enabled:
+                self.get_logger().info(
+                    f'短冲推球已开启：胸前 0.90 m 内且指令≥0.80 时冲刺 '
+                    f'{self.controller.dash_speed:.2f} m/s × '
+                    f'{self.controller.dash_duration*1000:.0f} ms，'
+                    f'冷却 {self.controller.dash_cooldown:.1f} s（步高不变）')
+            elif scale[0] > 0.60:
+                self.get_logger().warning(
+                    '高速档权重但未开 rl_dash：高位推球只能靠连续走位，'
+                    '射门距离受限；确认需要时加 -p rl_dash:=true')
+            if self.controller.speed_limit < scale[0]:
+                self.get_logger().warning(
+                    f'rl_speed_limit={self.controller.speed_limit:.2f} 低于动作缩放 '
+                    f'前进分量 {scale[0]:.2f}，实际会被限速压掉一部分动作幅度')
+            if actor.obs_dim == 41:
+                if not self.teammate_topic:
+                    self.get_logger().warning(
+                        '41 维策略的队友槽位（29-34）需要 teammate_pose_topic；'
+                        '未配置时该槽位恒为 0，策略会按"看不到队友"行动')
+                if len(self.opponent_topics) < 2:
+                    self.get_logger().warning(
+                        '41 维策略的次近对手槽位（35-40）需要 2 个对手话题 '
+                        'opponent1/opponent2_pose_topic；当前只有 '
+                        f'{len(self.opponent_topics)} 个，第二槽位恒为 0')
+            elif self.teammate_topic or len(self.opponent_topics) > 1:
+                self.get_logger().warning(
+                    f'已配置队友/多个对手，但当前权重是 {actor.obs_dim} 维（1v1），'
+                    '队友与次近对手槽位不生效；2v2 需要 41 维权重：把'
+                    f' policy_team_{self.rl_policy}_actor.npz 放到 pkg_soccer/ 下，'
+                    '或 -p rl_model_path:=<41 维 npz>')
+        elif self.opponent_topics or self.teammate_topic:
+            self.get_logger().info(
+                f'队友/对手话题已配置（规则模式只记录、不参与决策）：'
+                f'teammate={self.teammate_topic or "无"}，'
+                f'opponents={self.opponent_topics or "无"}')
+
+    def static_field(self, values):
+        """不用门刚体时，按场地尺寸和进攻方向直接给出球门与场地坐标。
+
+        复赛场地：长 10 m、宽 5.5 m、门宽 1.5 m、门线距端线 0.415 m（两门相距 9.17 m）。
+        进攻方向只由 attack_goal 决定，换边时用另一个取值重启即可。
+        """
+        half_l = self.field_length / 2.0
+        half_w = self.field_width / 2.0
+        goal_x = half_l - self.goal_line_inset
+        if self.attack_goal == 'goal_left':
+            goal_x, goal_yaw = -goal_x, math.pi
+        else:
+            goal_yaw = 0.0
+        out = dict(values)
+        out.update(goal_x=goal_x, goal_y=0.0, goal_yaw=goal_yaw,
+                   field_center_x=0.0, field_center_y=0.0, field_yaw=0.0,
+                   field_min_x=-half_l, field_max_x=half_l,
+                   field_min_y=-half_w, field_max_y=half_w)
+        return out
 
     def param(self, name, default):
         """启动参数只读，避免运行时变更却未实际应用。"""
         return self.declare_parameter(
             name, default, ParameterDescriptor(read_only=True)).value
-
-    def fixed_param(self, name, value):
-        """Attacker shortcut fixes lab settings; legacy soccer remains configurable."""
-        actual = self.param(name, value)
-        if self.attacker_profile and actual != value:
-            raise ValueError(f'attacker 入口固定 {name}={value!r}；请移除该覆盖参数')
-        return actual
 
     def endpoint(self, name):
         """兼容有/无机器狗命名空间的运动接口。"""
@@ -298,6 +450,34 @@ class Soccer(Node):
             self.controller.wait_for_pose(str(exc))
             if now - self.last_error_report >= 1.0:
                 self.get_logger().warning(str(exc))
+                self.last_error_report = now
+
+    def on_body(self, kind, msg):
+        """队友/对手位姿：校验坐标系与数值，RL 模式交给"最近对手"选择。"""
+        now = time.monotonic()
+        try:
+            frame = self.message_frame(msg)
+            p, q = msg.pose.position, msg.pose.orientation
+            if not all(math.isfinite(v) for v in (p.x, p.y, p.z)):
+                raise ValueError('动捕位置包含无效数值')
+            yaw = yaw_from_quaternion(q.x, q.y, q.z, q.w)
+            # 队友与对手用各自的刚体朝向修正（同型号狗通常都是 0）。
+            yaw = wrap_angle(yaw + (self.teammate_yaw_offset if kind == 'teammate'
+                                    else self.opponent_yaw_offset))
+            stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+            x = p.x * self.position_scale
+            y = p.y * self.position_scale
+            self.body_sequence += 1
+            self.bodies[kind] = Pose(x, y, yaw, now, frame, stamp,
+                                     self.body_sequence)
+            if self.control_mode == 'rl':
+                self.controller.update_body(kind, x, y, yaw, now, frame, stamp)
+        except (ValueError, TypeError, AttributeError) as exc:
+            self.bodies[kind] = None
+            if self.control_mode == 'rl':
+                self.controller.invalidate_body(kind, 'invalid_pose')
+            if now - self.last_error_report >= 1.0:
+                self.get_logger().warning(f'{kind} 位姿无效：{exc}')
                 self.last_error_report = now
 
     def on_goal(self, name, msg):
@@ -460,9 +640,15 @@ class Soccer(Node):
         return True
 
     def on_status(self, msg):
-        """按运动反馈确认坐/趴/站姿；运行后姿态改变则停止，不再次起身。"""
+        """按运动反馈确认坐/趴/站姿；运行后姿态改变则停止，不再次起身。
+
+        进球/死球暂停期间裁判会搬狗，这段不更新姿态门控，避免把"被抱起"当成故障
+        结束整场比赛；恢复比赛后重新按新鲜状态判定。
+        """
         guard = self.stand_guard
-        already_failed = guard.state == 'POSTURE_FAILED'
+        if self.controller.paused:
+            # 进球/死球暂停期间裁判会搬狗，姿态跳变不算故障；恢复比赛后重新判定。
+            return
         try:
             healthy = (msg.ori_error == 0 and msg.footpos_error == 0 and
                        len(msg.motor_error) > 0 and
@@ -470,13 +656,6 @@ class Soccer(Node):
                        0 <= msg.order_process_bar <= 100)
             guard.update(msg.motion_id, msg.switch_status, msg.order_process_bar,
                          healthy, time.monotonic())
-            if guard.state == 'POSTURE_FAILED' and not already_failed:
-                # Preserve the triggering frame, even if later reports recover.
-                guard.reason += (
-                    f'；motion_id={msg.motion_id}, switch_status={msg.switch_status}, '
-                    f'ori_error={msg.ori_error}, footpos_error={msg.footpos_error}, '
-                    f'order_process_bar={msg.order_process_bar}, '
-                    f'motor_error={list(msg.motor_error)}')
         except (AttributeError, TypeError, ValueError):
             guard.fail('MotionStatus 字段不兼容')
         if guard.state == 'POSTURE_FAILED':
@@ -491,7 +670,7 @@ class Soccer(Node):
             self.stand_future = None
 
     def posture_allows_motion(self, now):
-        """只请求一次 111 站立；服务成功并收到有效站稳状态后发送步态。"""
+        """只请求一次 111 站立；成功且连续反馈站稳后才发送快速步态。"""
         guard = self.stand_guard
         # 先检查超时，晚到的服务结果不能解除故障锁定。
         guard.command(now)
@@ -533,7 +712,7 @@ class Soccer(Node):
         return action == 'WALK'
 
     def publish(self, velocity, end=False):
-        """发送可配置的 303/305 步态，结束帧使用协议常量。"""
+        """发送可配置的 303/305 步态；步高固定，不切位控。"""
         if self.pub is None:
             return
         msg = MotionServoCmd()
@@ -542,7 +721,7 @@ class Soccer(Node):
         msg.cmd_source = 0
         msg.value = 2
         msg.vel_des = [float(v) for v in velocity]
-        msg.step_height = [0.05, 0.05]
+        msg.step_height = [self.walk_step_height, self.walk_step_height]
         self.pub.publish(msg)
         self.servo_active = not end
 
@@ -558,9 +737,26 @@ class Soccer(Node):
             positions = (f'dog=({d.x:.2f},{d.y:.2f},{d.yaw:.2f}rad) '
                          f'ball=({b.x:.2f},{b.y:.2f})' if d and b else '等待定位')
             if self.control_mode == 'rl' and self.controller.duel:
-                o = self.controller.opponent
-                positions += (f' opponent=({o.x:.2f},{o.y:.2f},{o.yaw:.2f}rad)'
-                              f' age={now-o.received:.2f}s' if o else ' opponent=未收到')
+                nearest = self.controller.opponent
+                positions += (f' nearest_opponent=({nearest.x:.2f},{nearest.y:.2f},'
+                              f'{nearest.yaw:.2f}rad) age={now-nearest.received:.2f}s'
+                              if nearest else ' nearest_opponent=未收到')
+                mate = self.controller.teammate
+                if self.controller.actor.obs_dim == 41:
+                    positions += (f' teammate=({mate.x:.2f},{mate.y:.2f},'
+                                  f'{mate.yaw:.2f}rad) age={now-mate.received:.2f}s'
+                                  if mate else ' teammate=未收到')
+            tracked = []
+            for kind, pose in self.bodies.items():
+                if pose is None:
+                    continue
+                age = now - pose.received
+                tracked.append(
+                    f'{kind}=({pose.x:.2f},{pose.y:.2f})' +
+                    ('' if age <= self.controller.cfg.pose_timeout
+                     else f'(断流{age:.1f}s)'))
+            if tracked:
+                positions += ' ' + ' '.join(tracked)
             target = self.controller.target_yaw
             heading = (f'；目标朝向={target:.2f}rad，'
                        f'偏差={math.degrees(wrap_angle(target-d.yaw)):.1f}度'
@@ -568,8 +764,12 @@ class Soccer(Node):
             orientation = (f'；dog原始四元数(x,y,z,w)='
                            f'{tuple(round(v, 4) for v in self.dog_quaternion)}'
                            if self.dog_quaternion is not None else '')
+            score = (f'；进球 {self.controller.goals}，发球后继续 '
+                     f'{self.controller.resumes} 次'
+                     if self.controller.goals or self.controller.resumes else '')
             progress = ('；PPO 连续控球' if self.control_mode == 'rl' else
                         f'；射门 {self.controller.kicks}/{self.controller.cfg.max_kicks}')
+            progress += score
             self.get_logger().info(
                 f'{state}: {reason}；{positions}{progress}；速度=({velocity[0]:.2f},'
                 f'{velocity[1]:.2f},{velocity[2]:.2f}){heading}{orientation}')
@@ -608,7 +808,7 @@ class Soccer(Node):
                     f'{self.calibration_min_samples}。')
                 self.last_report = now
             return
-        if self.enable_motion and not c.finished:
+        if self.enable_motion and not c.finished and not c.paused:
             if not self.posture_allows_motion(now):
                 self.end_motion()
                 guard = self.stand_guard
@@ -627,8 +827,7 @@ class Soccer(Node):
         if not self.enable_motion:
             if self.control_mode == 'rl':
                 velocity = c.command(now)
-                self.report(now, (c.state + '_SHADOW') if c.state in (
-                    'RL', 'ATTACK_RL', 'ATTACK_REPOSITION', 'ATTACK_BLOCKED') else c.state,
+                self.report(now, 'RL_SHADOW' if c.state == 'RL' else c.state,
                             c.reason + '（只推理，不发运动指令）', velocity)
                 return
             if c.poses_valid(now):
@@ -641,7 +840,44 @@ class Soccer(Node):
                 self.report(now, 'WAIT_POSE', self.pose_wait_reason(now), Controller.ZERO)
             return
         velocity = c.command(now)
-        if c.finished or c.state in ('WAIT_POSE', 'WAIT_REFEREE'):
+        # 进入 KICK 时锁定方向，直接给最大速度持续 kick_max_ms（不切位控、不抬腿）。
+        # 脉冲跑满整段时间：KICK 会因为"球已移动/已冲出 kick_travel"提前结束，
+        # 但断流、暂停、终态必须立刻停手（不再盲推）。
+        if not c.finished:
+            if c.state == 'KICK' and self.push_burst_until is None and not self.push_done:
+                speed = math.hypot(velocity[0], velocity[1])
+                if speed > 1e-6:
+                    self.push_direction = (velocity[0] / speed, velocity[1] / speed)
+                elif c.dog is not None:
+                    self.push_direction = (math.cos(c.dog.yaw), math.sin(c.dog.yaw))
+                else:
+                    self.push_direction = (1.0, 0.0)
+                self.push_burst_until = now + self.kick_max_ms / 1000.0
+                self.push_done = True
+                self.get_logger().info(
+                    f'全力推球：{self.kick_max_speed:.2f} m/s × '
+                    f'{self.kick_max_ms} ms（步高不变，无腿部动作）'
+                    + ('（dry-run，不发指令）' if self.kick_dry_run else ''))
+            if self.push_burst_until is not None:
+                stalled = (c.paused or
+                           c.state in ('WAIT_POSE', 'WAIT_REFEREE'))
+                if stalled or now >= self.push_burst_until:
+                    self.push_burst_until = None
+                else:
+                    burst = (self.push_direction[0] * self.kick_max_speed,
+                             self.push_direction[1] * self.kick_max_speed, 0.0)
+                    if self.kick_dry_run:
+                        self.report(now, 'PUSH_DRY_RUN',
+                                    f'[dry-run] 全力推球 {self.kick_max_speed:.2f}m/s',
+                                    burst)
+                        return
+                    self.publish(burst)
+                    self.report(now, 'PUSH_MAX',
+                                f'全力推球 {self.kick_max_speed:.2f}m/s', burst)
+                    return
+            if c.state != 'KICK':
+                self.push_done = False
+        if c.finished or c.state in ('WAIT_POSE', 'WAIT_PLAY', 'WAIT_REFEREE'):
             self.end_motion()
         else:
             self.publish(velocity)
@@ -659,7 +895,7 @@ class Soccer(Node):
                 time.sleep(0.03)
 
 
-def main(args=None, attacker_profile=False):
+def main(args=None):
     """Ctrl+C/SIGTERM 先发结束帧，再销毁节点和 ROS context。"""
     rclpy.init(args=args)
     node = None
@@ -668,7 +904,7 @@ def main(args=None, attacker_profile=False):
     try:
         for signum in (signal.SIGINT, signal.SIGTERM):
             previous[signum] = signal.signal(signum, lambda *_: stopping.set())
-        node = Soccer(attacker_profile=attacker_profile)
+        node = Soccer()
         while rclpy.ok() and not stopping.is_set() and not (
                 node is not None and node.calibration_complete):
             rclpy.spin_once(node, timeout_sec=0.1)
@@ -683,11 +919,6 @@ def main(args=None, attacker_profile=False):
             rclpy.shutdown()
         for signum, handler in previous.items():
             signal.signal(signum, handler)
-
-
-def attacker_main(args=None):
-    """Short competition entry: fixed lab configuration, ATTACK supervisor."""
-    main(args, attacker_profile=True)
 
 
 if __name__ == '__main__':

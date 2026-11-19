@@ -30,9 +30,6 @@ class StandGuard:
         self.response_ok = False
         self.response_code = None
         self.ready_once = False
-        # No multi-frame startup debounce: use one fresh report that passes
-        # the checks below. Missing, stale and fault reports still block motion.
-        self.required_stable_frames = 1
 
     def fail(self, reason):
         """失败锁定，不自动重发站立或恢复行走。"""
@@ -40,13 +37,8 @@ class StandGuard:
         self.reason = reason
 
     def _standing(self):
-        return (self.motion_id in (102, 112)
+        return (self.motion_id == 112
                 or self.motion_id == 111 and self.progress >= 96)
-
-    def _idle(self):
-        """CyberDog firmware may report a healthy idle state this way."""
-        return (self.motion_id == 0 and self.switch_status == 14 and
-                self.progress >= 96)
 
     def update(self, motion_id, switch_status, progress, healthy, now):
         """每条状态消息调用一次；定时器不能代替新消息确认。"""
@@ -62,9 +54,8 @@ class StandGuard:
         self.switch_status = switch_status
         self.progress = progress
         self.healthy = healthy
-        normal = healthy and switch_status in (0, 1, 14)
-        completed = self._standing() or motion_id == self.walk_id or (
-            motion_id == 0 and switch_status == 14 and progress >= 96)
+        normal = healthy and switch_status == 0
+        completed = self._standing() or motion_id == self.walk_id
         resting = motion_id in (101, 143) and progress >= 96
         if normal and (completed or resting):
             self.stable_count = self.stable_count + 1 if previous == motion_id else 1
@@ -72,9 +63,9 @@ class StandGuard:
             self.stable_count = 0
         if self.state == 'POSTURE_FAILED':
             return
-        if not healthy or switch_status not in (0, 1, 14):
+        if not healthy or switch_status not in (0, 1):
             self.fail('运动状态报告故障或禁止切换，不能自动站立/行走')
-        elif self.ready_once and motion_id not in (102, 111, 112, self.walk_id):
+        elif self.ready_once and motion_id not in (111, 112, self.walk_id):
             self.fail('运行中姿态改变，停止控制且不重新自动站立')
 
     def command(self, now):
@@ -101,32 +92,26 @@ class StandGuard:
             return 'WALK'
         if self.requested_at is not None:
             if (self.response_ok and self._standing()
-                    and self.stable_count >= self.required_stable_frames):
+                    and self.stable_count >= 3):
                 self.ready_once = True
                 self.state = 'READY'
-                self.reason = '站立服务成功，已收到有效站稳状态'
+                self.reason = '站立服务成功，且连续状态确认站稳'
                 return 'WALK'
             self.state = 'STANDING'
-            self.reason = ('等待站立服务成功与动作完成：'
-                           f'response_ok={self.response_ok}, motion_id={self.motion_id}, '
-                           f'switch_status={self.switch_status}, progress={self.progress}')
+            self.reason = '等待站立服务成功与连续站稳确认'
             return 'WAIT'
-        if self.stable_count < self.required_stable_frames:
+        if self.stable_count < 3:
             self.state = 'WAIT_POSTURE'
-            self.reason = ('当前状态未满足起步条件：'
-                           f'motion_id={self.motion_id}, switch_status={self.switch_status}, '
-                           f'progress={self.progress}, healthy={self.healthy}')
+            self.reason = '等待姿态正常且连续稳定三帧'
             return 'WAIT'
         if self._standing() or self.motion_id == self.walk_id:
             self.ready_once = True
             self.state = 'READY'
             self.reason = '已确认处于站立或当前行走步态'
             return 'WALK'
-        if self.motion_id in (101, 143) or self._idle():
+        if self.motion_id in (101, 143):
             self.state = 'WAIT_STAND_SERVICE'
-            self.reason = ('确认坐下/趴下，等待站立服务可用'
-                           if self.motion_id in (101, 143) else
-                           '确认健康空闲状态，等待站立服务可用')
+            self.reason = '确认坐下/趴下，等待站立服务可用'
             return 'REQUEST'
         self.state = 'WAIT_POSTURE'
         self.reason = '姿态不在可自动起步范围内'

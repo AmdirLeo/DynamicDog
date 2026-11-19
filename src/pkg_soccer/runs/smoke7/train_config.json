@@ -1,0 +1,43 @@
+{
+  "obs_dim": 41,
+  "role": "attacker",
+  "action_scale": [
+    0.9,
+    0.4,
+    0.7
+  ],
+  "speed_limit": 1.0,
+  "speed_scale": 2.0,
+  "dash": true,
+  "dash_speed": 1.5,
+  "dash_ms": 450,
+  "dash_cooldown": 1.2,
+  "dash_goal_cone": 0.9,
+  "seed": 0,
+  "steps": 20480,
+  "reward_dead_ball": -3.0,
+  "reward_half": 0.0,
+  "reward_possess": 0.0,
+  "reward_press": 0.0,
+  "reward_edge": 1.0,
+  "reward_aim": 0.0,
+  "shaping_ball": 1.5,
+  "shaping_stage": 0.8,
+  "reward_own": 0.0,
+  "reward_front": 0.0,
+  "reward_back": 0.2,
+  "ball_restitution": [
+    0.15,
+    0.15
+  ],
+  "ball_drag": [
+    1.2,
+    1.2
+  ],
+  "scripted_speed": 0.6,
+  "body_dropout": 0.05,
+  "randomize": true,
+  "peer_teammate": "",
+  "peer_opponents": "",
+  "init": "runs/sp_e/policy.npz"
+}
