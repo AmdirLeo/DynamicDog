@@ -131,8 +131,17 @@ TEAM_B_2=/vrpn/team_b_2/pose
   `mi_desktop_48_b0_2d_7b_03_fd` 只是占位，填错的话指令发到不存在的 topic，
   **狗一步不动且没有任何报错**。
 - 四个 VRPN 话题里只要有一个还是占位值，`start.sh` 会直接退出（防止拿错话题上场）。
+  台架只测本狗时加 `SKIP_TOPIC_CHECK=1` 跳过这个检查。
 - 也可以用环境变量临时覆盖，不改文件：
   `DOG_NAME=xxx TEAM_A_1=/vrpn/Lizj_dog/pose ./start.sh A1`
+- 写法必须是 `${VAR:-默认值}`（冒号 + 减号）。写成 `${VAR:默认值}` 会被 bash 当成
+  **子串截取**，配合脚本开头的 `set -u` 报 `VAR: unbound variable`，看着像未定义，
+  其实是少了那个 `-`。
+
+> ⚠️ `shared_2v2`（41 维）要求 **dog / ball / teammate / opponent / opponent2 五路都有数据**，
+> 少一路就永久停在 `WAIT_POSE`（日志会打印缺哪一路）。台架只接本狗 + 球时，
+> 用 `RL_POLICY=stage2 ENABLE_MOTION=false SKIP_TOPIC_CHECK=1 ./start.sh A1`
+> 先把链路跑通（23 维，只要 dog+ball）。
 
 ### 2.4 启动顺序
 
