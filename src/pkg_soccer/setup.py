@@ -8,7 +8,8 @@ setup(
     packages=[package_name],
     package_data={package_name: ['policy_stage2_actor.npz',
                                  'policy_duel_attacker_actor.npz',
-                                 'policy_duel_defender_actor.npz']},
+                                 'policy_duel_defender_actor.npz',
+                                 'policy_2v2_shared_actor.npz']},
     data_files=[
         ('share/ament_index/resource_index/packages', ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
