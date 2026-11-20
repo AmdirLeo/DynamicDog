@@ -329,10 +329,11 @@ ros2 topic echo /vrpn/ball/pose --once
 
 | 现象 | 常见原因 |
 |---|---|
-| 节点起来但狗不动，日志 `WAIT_POSE` | 位姿话题断流、坐标系不一致（`frame_id` 不同）、球/狗刚体名写错 |
+| `install/setup.bash: line N: COLCON_TRACE: unbound variable` | 脚本在 `set -u` 下 source colcon 环境。用 4bb1b55 之后的 `start.sh`（source 前后 `set +u` / `set -u`）；手改的话就是把 `source` 那行包在 `set +u` 和 `set -u` 之间 |
+| 节点起来但狗不动，日志 `WAIT_POSE` | 位姿话题断流、坐标系不一致（`frame_id` 不同）、球/狗刚体名写错；`shared_2v2` 还会要求队友和两个对手都有数据 |
 | 日志 `等待连续动捕数据` | VRPN 刚起，等 3~5 帧即可；持续出现说明丢包严重 |
 | 两只狗互相抢球 | 两个节点用了同一角色，检查 `teammate_pose_topic` |
-| 进球后一直停着 | 球没放回发球点（容差 0.40 m）或球还在滚；等 25 s 会兜底放行 |
+| 进球/出界后不动 | 等裁判把球**移动过且静止 0.5 s** 才自动继续；球还在滚就继续等。`RL_CONTINUE_DEADZONE=true`（默认）时死区里会以 0.35 m/s 低速走位，不会完全站住 |
 | 动作很猛/容易撞球出界 | `rl_speed_gain` 放大过多，降到 1.5~2.0 再试 |
 | 狗在充电/刚上电不动 | `switch_status=14` 或未站稳，运控会拒绝指令（日志有 3028） |
 
