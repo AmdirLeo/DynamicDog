@@ -7,6 +7,10 @@ ROLE="${1:-A1}"
 ENABLE_MOTION="${ENABLE_MOTION:-false}"
 RL_POLICY="${RL_POLICY:-shared_2v2}"
 RL_MODEL_PATH="${RL_MODEL_PATH:-}"
+# 最高速度（m/s）：策略是 0.45 档，默认按此值把动作放大（0.45 × 2.667 = 1.2）。
+RL_SPEED_LIMIT="${RL_SPEED_LIMIT:-1.2}"
+# 0 = 按 RL_SPEED_LIMIT 自动标定；想复现策略原始 0.45 速度就设 1.0
+RL_SPEED_GAIN="${RL_SPEED_GAIN:-0}"
 
 TEAM_A_1="${TEAM_A_1:-/vrpn/xll_dog/pose}"
 TEAM_A_2="${TEAM_A_2:-/vrpn/team_a_2/pose}"
@@ -42,4 +46,6 @@ exec ros2 run pkg_soccer soccer --ros-args \
   -p opponent_pose_topic:="$OPPONENT_TOPIC" \
   -p opponent2_pose_topic:="$OPPONENT2_TOPIC" \
   -p attack_goal:="$GOAL" \
+  -p rl_speed_limit:="$RL_SPEED_LIMIT" \
+  -p rl_speed_gain:="$RL_SPEED_GAIN" \
   -p enable_motion:="$ENABLE_MOTION"

@@ -75,8 +75,11 @@ class Soccer(Node):
             from .rl_control import RLController
             self.controller = RLController(
                 Config(**values), self.param('rl_model_path', ''),
-                float(self.fixed_param('rl_speed_limit', .45) if fixed_profile else
-                      self.param('rl_speed_limit', .45)), self.rl_policy)
+                float(self.fixed_param('rl_speed_limit', 1.2) if fixed_profile else
+                      self.param('rl_speed_limit', 1.2)), self.rl_policy,
+                # 0 = 自动：满舵前进恰好等于 rl_speed_limit（shared_2v2 的
+                # 0.45 档 → ×2.667 = 1.2 m/s）。转向不放大。
+                speed_gain=float(self.param('rl_speed_gain', 0.0)))
         self.enable_motion = self.param('enable_motion', False)
         if type(self.enable_motion) is not bool:
             raise ValueError('enable_motion 必须为 true/false')
@@ -309,8 +312,15 @@ class Soccer(Node):
             if kind == 'dog':
                 self.dog_quaternion = (q.x, q.y, q.z, q.w)
             stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
-            self.controller.update(kind, p.x*self.position_scale, p.y*self.position_scale,
-                                   yaw, now, frame, stamp)
+            # 队友/对手走 update_peer：它们断流只让观测槽位填 0（合法朝向 sin/cos
+            # 不会同时为 0，策略能识别），不应像主位姿那样触发整机 WAIT_POSE。
+            # 直接调 update() 会被 control.update 的 dog/ball 检查拒绝。
+            peer = kind in ('opponent', 'teammate', 'opponent2')
+            updater = (self.controller.update_peer
+                       if peer and hasattr(self.controller, 'update_peer')
+                       else self.controller.update)
+            updater(kind, p.x*self.position_scale, p.y*self.position_scale,
+                    yaw, now, frame, stamp)
         except (ValueError, TypeError, AttributeError) as exc:
             setattr(self.controller, kind, None)
             if self.control_mode == 'rl' and kind in self.controller.tracks:
@@ -662,7 +672,7 @@ class Soccer(Node):
                 self.report(now, 'WAIT_POSE', self.pose_wait_reason(now), Controller.ZERO)
             return
         velocity = c.command(now)
-        if c.finished or c.state in ('WAIT_POSE', 'WAIT_REFEREE'):
+        if c.finished or c.state in ('WAIT_POSE', 'WAIT_REFEREE', 'WAIT_PLAY'):
             self.end_motion()
         else:
             self.publish(velocity)

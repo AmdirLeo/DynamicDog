@@ -68,15 +68,22 @@ class Actor:
 class RLController(Controller):
     """Reuse goal detection, field checks, turn feedback and ROS posture gate."""
 
-    def __init__(self, config, model_path='', speed_limit=0.30, policy='stage2'):
+    def __init__(self, config, model_path='', speed_limit=0.30, policy='stage2',
+                 speed_gain=1.0):
         super().__init__(config)
         if policy not in ('stage2', 'attacker', 'defender', 'shared_2v2', 'shared_2v2_large'):
             raise ValueError('rl_policy 必须为 stage2/attacker/defender/shared_2v2/shared_2v2_large')
         self.policy = policy
         self.duel = policy != 'stage2'
         self.team2v2 = policy in ('shared_2v2', 'shared_2v2_large')
-        if not math.isfinite(speed_limit) or not 0 < speed_limit <= 0.45:
-            raise ValueError('rl_speed_limit 必须在 (0, 0.45] m/s')
+        if not math.isfinite(speed_limit) or not 0 < speed_limit <= 1.5:
+            raise ValueError('rl_speed_limit 必须在 (0, 1.5] m/s（协议 vel_des 上限 1.5）')
+        # 策略的动作缩放来自权重（shared_2v2 是 0.45/0.20/0.70）。想要更高的
+        # 最高速度就把 m/s 两维按增益放大；转向（rad/s）不放大，否则会失控。
+        self.speed_gain = float(speed_gain)
+        # 0 = 自动：把"满舵前进"标定成正好等于 speed_limit（推荐，换权重也不用改）。
+        if not (math.isfinite(self.speed_gain) and 0.0 <= self.speed_gain <= 4.0):
+            raise ValueError('rl_speed_gain 必须在 [0, 4.0]（0=按 rl_speed_limit 自动标定）')
         if not model_path and self.team2v2:
             filename = ('policy_2v2_shared_large_actor.npz' if policy == 'shared_2v2_large'
                         else 'policy_2v2_shared_actor.npz')
@@ -89,6 +96,13 @@ class RLController(Controller):
                 self.actor.role != policy):
             raise ValueError('rl_policy 与模型观测维度或角色不一致')
         self.speed_limit = speed_limit
+        scale = np.asarray(self.actor.scale, np.float32)
+        if self.speed_gain <= 0.0:
+            self.speed_gain = (float(speed_limit)/scale[0]
+                               if scale[0] > 0 else 1.0)
+            self.speed_gain = min(max(self.speed_gain, 0.2), 4.0)
+        self.effective_scale = np.array(
+            [scale[0]*self.speed_gain, scale[1]*self.speed_gain, scale[2]], np.float32)
         self.tracks = {'dog': Track(3.0), 'ball': Track(12.0)}
         if self.duel:
             self.tracks['opponent'] = Track(3.0)
@@ -228,7 +242,7 @@ class RLController(Controller):
             self.stop('RL 推理失败：' + str(exc))
             velocity = self.ZERO
         # The next observation reflects the command after limits/protection.
-        self.previous_action = np.asarray(velocity, dtype=np.float32)/self.actor.scale
+        self.previous_action = np.asarray(velocity, dtype=np.float32)/self.effective_scale
         return velocity
 
     def field_coordinates(self, x, y):
@@ -296,6 +310,16 @@ class RLController(Controller):
     def _command(self, now):
         if self.finished:
             return self.ZERO
+        # 进球/球出界/球停门线后都不结束比赛：暂停等裁判把球放回发球点，
+        # 球静止在任一发球点且狗也静止后 rearm() 自动继续（规则 4.2/4.4）。
+        if self.paused:
+            if self._resume_ready(now):
+                self.rearm(now, '球已回到发球点，重新开始比赛')
+            else:
+                self.state = 'WAIT_PLAY'
+            if self.attack_planner:
+                self.attack_planner.reset()
+            return self.ZERO
         if self.started_at is not None and now-self.started_at >= self.cfg.max_run_time:
             self.stop('RL 达到运行时间上限')
             return self.ZERO
@@ -308,20 +332,24 @@ class RLController(Controller):
                 self.attack_planner.reset()
             return self.ZERO
         if self.scored:
-            self.state, self.reason = 'GOAL', '球已从场内越过球门线，进球'
+            self.goals += 1
+            self.pause_play(now, f'进球（本场第 {self.goals} 个），等待裁判发球')
             return self.ZERO
         d, b, c = self.dog, self.ball, self.cfg
-        if not self.inside_field(d.x, d.y) or not self.inside_field(b.x, b.y):
-            self.stop('狗或球已超出设定场地')
+        if not self.inside_field(d.x, d.y):
+            self.stop('狗已超出设定场地')
+            return self.ZERO
+        if not self.inside_field(b.x, b.y):
+            self.pause_play(now, '球已出界，等待裁判就近发球')
             return self.ZERO
         if self.goal_coordinates(b.x, b.y)[0] >= c.ball_radius:
-            self.stop('球已在门线后，未确认有效进球，请重新摆球')
+            self.pause_play(now, '球在球门线后，等待裁判发球')
             return self.ZERO
         if self.duel:
             bx, _ = self.field_coordinates(b.x, b.y)
             gx, _ = self.field_coordinates(c.goal_x, c.goal_y)
             if bx <= -gx-c.ball_radius:
-                self.stop('球已越过本方门线，请确认结果并重新摆球')
+                self.pause_play(now, '球已越过本方门线，等待裁判发球')
                 return self.ZERO
         if self.duel and self.referee_wait(now):
             if self.attack_planner:
@@ -340,7 +368,7 @@ class RLController(Controller):
         # Training accumulates estimated contact from the previous observation.
         self.distance = math.hypot(b.x-d.x, b.y-d.y)
         self.contact_seen |= self.distance < .43
-        velocity = action*self.actor.scale
+        velocity = action*self.effective_scale
         mode, reason = 'RL', 'PPO ' + self.policy + ' 策略控制'
         if self.attack_planner:
             override = self.attack_planner.command(self, now)
@@ -350,7 +378,8 @@ class RLController(Controller):
             velocity = self.attack_planner.limit_contact(self, velocity)
         # Rules and RL share the same body-axis envelope and total speed cap.
         velocity = np.asarray(velocity, dtype=np.float32)
-        axis_ratio = max(1., abs(velocity[0])/.45, abs(velocity[1])/.20)
+        axis_ratio = max(1., abs(velocity[0])/self.effective_scale[0],
+                         abs(velocity[1])/self.effective_scale[1])
         velocity[:2] /= axis_ratio
         speed = float(np.linalg.norm(velocity[:2]))
         if speed > self.speed_limit:
