@@ -60,10 +60,15 @@ src/pkg_soccer/                      ← 包根，名字随便，但里面要有
 ### 2.1 放到狗上
 
 狗上的工作区（SSH 进去 `ls` 能看到 `build/ install/ log/ src/` 的那个目录，
-从截图看是 `~/LIZJ`）：
+从截图看是 `~/lizj`）：
+
+> 路径**区分大小写**，现场是小写 `~/lizj`。写成 `~/LIZJ/...` 会报
+> `cp: cannot create regular file '/home/mi/LIZJ/start.sh': No such file or directory`。
+> `start.sh` 会自动按"脚本所在目录 → 当前目录 → ~/lizj → ~/LIZJ → ~/A_ws"找
+> `install/setup.bash`，所以只要脚本放对了，从哪个目录启动都能 source 到。
 
 ```
-~/LIZJ/
+~/lizj/
 ├── build/  install/  log/
 └── src/
     ├── myinterface_pkg/      # 别的包，不要动
@@ -73,11 +78,11 @@ src/pkg_soccer/                      ← 包根，名字随便，但里面要有
 **方式 A：狗上直接 clone（能上外网时最省事）**
 
 ```bash
-cd ~/LIZJ
+cd ~/lizj
 mv src/pkg_soccer src/pkg_soccer.old.$(date +%m%d)    # 先备份旧包
 git clone --depth 1 https://github.com/AmdirLeo/DynamicDog.git /tmp/dd
 cp -r /tmp/dd/src/pkg_soccer src/
-cp /tmp/dd/start.sh ~/LIZJ/
+cp /tmp/dd/start.sh ~/lizj/
 ```
 
 **方式 B：从 Windows 用 scp 传**
@@ -85,8 +90,8 @@ cp /tmp/dd/start.sh ~/LIZJ/
 ```bash
 # 在 Windows 的 Git Bash 里执行
 cd "E:/机器狗程序调试区"
-scp -r _dd/src/pkg_soccer mi@<狗IP>:~/LIZJ/src/
-scp _dd/start.sh mi@<狗IP>:~/LIZJ/
+scp -r _dd/src/pkg_soccer mi@<狗IP>:~/lizj/src/
+scp _dd/start.sh mi@<狗IP>:~/lizj/
 ```
 
 只传必要文件（省时间，不传 runs/train）：
@@ -94,7 +99,7 @@ scp _dd/start.sh mi@<狗IP>:~/LIZJ/
 ```bash
 scp -r _dd/src/pkg_soccer/pkg_soccer _dd/src/pkg_soccer/resource \
        _dd/src/pkg_soccer/package.xml _dd/src/pkg_soccer/setup.py \
-       _dd/src/pkg_soccer/setup.cfg mi@<狗IP>:~/LIZJ/src/pkg_soccer/
+       _dd/src/pkg_soccer/setup.cfg mi@<狗IP>:~/lizj/src/pkg_soccer/
 ```
 
 > 老版本里没有 `attack.py` 和 `policy_2v2_shared_actor.npz`，这两个必须带上，
@@ -103,7 +108,7 @@ scp -r _dd/src/pkg_soccer/pkg_soccer _dd/src/pkg_soccer/resource \
 ### 2.2 编译
 
 ```bash
-cd ~/LIZJ
+cd ~/lizj
 source /opt/ros/galactic/setup.bash
 colcon build --packages-select pkg_soccer        # 首次编译约 10 s
 source install/setup.bash
@@ -112,7 +117,7 @@ source install/setup.bash
 编译成功的标志是这两条都有输出：
 
 ```bash
-ros2 pkg prefix pkg_soccer                      # → /home/mi/LIZJ/install/pkg_soccer
+ros2 pkg prefix pkg_soccer                      # → /home/mi/lizj/install/pkg_soccer
 ros2 pkg executables pkg_soccer                 # → pkg_soccer soccer
 ```
 
@@ -161,7 +166,7 @@ ros2 launch vrpn_listener sync_entity_state.launch
 ros2 topic list | grep vrpn                     # 确认 4 只狗 + 球的 pose 都在
 
 # ② 空跑：只推理、不发运动指令（换场地/换话题必做）
-cd ~/LIZJ && ENABLE_MOTION=false ./start.sh A1
+cd ~/lizj && ENABLE_MOTION=false ./start.sh A1
 
 # ③ 真跑
 ENABLE_MOTION=true ./start.sh A1

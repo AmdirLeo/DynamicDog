@@ -83,10 +83,12 @@ fi
 
 
 
-# 工作区：优先 A_WS，其次当前目录，再退到 ~/LIZJ、~/A_ws
+# 工作区：优先 A_WS，其次脚本所在目录、当前目录，再退到 ~/lizj、~/LIZJ、~/A_ws
+# （Linux 区分大小写，现场工作区是 ~/lizj，不要写成 ~/LIZJ）
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WS="${A_WS:-}"
 if [[ -z "$WS" ]]; then
-  for cand in "$PWD" "$HOME/LIZJ" "$HOME/A_ws"; do
+  for cand in "$SCRIPT_DIR" "$PWD" "$HOME/lizj" "$HOME/LIZJ" "$HOME/A_ws"; do
     if [[ -f "$cand/install/setup.bash" ]]; then WS="$cand"; break; fi
   done
 fi
