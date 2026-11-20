@@ -34,16 +34,54 @@ case "$ROLE" in
   *) echo "用法：$0 A1|A2|B1|B2" >&2; exit 2 ;;
 esac
 
-if [[ "${SKIP_TOPIC_CHECK:-0}" != "1" ]] &&
-   [[ "$TEAM_A_1" == "/vrpn/xll_dog/pose" ||
-      "$TEAM_A_2" == "/vrpn/team_a_2/pose" ||
-      "$TEAM_B_1" == "/vrpn/team_b_1/pose" ||
-      "$TEAM_B_2" == "/vrpn/team_b_2/pose" ]]; then
-  echo "请先在 start.sh 顶部填写 TEAM_A_1/A_2、TEAM_B_1/B_2 的实际 VRPN 话题。" >&2
+# 占位话题判定（只有这几条默认值算"没填"）
+is_placeholder() {
+  case "$1" in
+    /vrpn/xll_dog/pose|/vrpn/team_a_2/pose|/vrpn/team_b_1/pose|/vrpn/team_b_2/pose) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# 只检查当前策略真正会用到的通道：
+#   stage2            只要本狗 + 球（23 维）
+#   attacker/defender 本狗 + 球 + 1 个对手（29 维，1v1）
+#   shared_2v2*       本狗 + 球 + 队友 + 2 个对手（41 维，2v2）
+missing=()
+is_placeholder "$DOG_TOPIC" && missing+=("本狗 dog_pose_topic=$DOG_TOPIC")
+if [[ "$RL_POLICY" != "stage2" ]]; then
+  is_placeholder "$OPPONENT_TOPIC" && missing+=("对手 opponent_pose_topic=$OPPONENT_TOPIC")
+fi
+case "$RL_POLICY" in
+  shared_2v2|shared_2v2_large)
+    is_placeholder "$TEAMMATE_TOPIC" && missing+=("队友 teammate_pose_topic=$TEAMMATE_TOPIC")
+    is_placeholder "$OPPONENT2_TOPIC" && missing+=("次近对手 opponent2_pose_topic=$OPPONENT2_TOPIC")
+    ;;
+esac
+
+if [[ "${SKIP_TOPIC_CHECK:-0}" != "1" && ${#missing[@]} -gt 0 ]]; then
+  echo "以下话题还是占位值（当前 rl_policy=$RL_POLICY，角色 $ROLE）：" >&2
+  printf '  - %s\n' "${missing[@]}" >&2
   echo "查法：ros2 topic list | grep vrpn" >&2
   echo "台架只测本狗时可加 SKIP_TOPIC_CHECK=1 跳过本检查。" >&2
   exit 2
 fi
+if [[ ${#missing[@]} -gt 0 ]]; then
+  echo "警告：SKIP_TOPIC_CHECK=1，忽略占位话题：" >&2
+  printf '  - %s\n' "${missing[@]}" >&2
+fi
+
+# 话题重复：同一刚体喂给两个通道，策略会看到"假队友/假对手"
+for pair in "TEAMMATE_TOPIC:$TEAMMATE_TOPIC" "OPPONENT_TOPIC:$OPPONENT_TOPIC" \
+            "OPPONENT2_TOPIC:$OPPONENT2_TOPIC"; do
+  if [[ "${pair#*:}" == "$DOG_TOPIC" ]]; then
+    echo "警告：${pair%%:*} 与 dog_pose_topic 相同（$DOG_TOPIC），策略会把自己当成别人。" >&2
+  fi
+done
+if [[ "$RL_POLICY" == shared_2v2* && "$OPPONENT_TOPIC" == "$OPPONENT2_TOPIC" ]]; then
+  echo "警告：两个对手话题相同（$OPPONENT_TOPIC），次近对手槽位会重复同一只狗。" >&2
+fi
+
+
 
 # 工作区：优先 A_WS，其次当前目录，再退到 ~/LIZJ、~/A_ws
 WS="${A_WS:-}"
