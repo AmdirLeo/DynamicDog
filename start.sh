@@ -114,11 +114,7 @@ fi
 ARGS=(
   -p control_mode:=rl
   -p rl_policy:="$RL_POLICY"
-  -p rl_model_path:="$RL_MODEL_PATH"
   -p dog_pose_topic:="$DOG_TOPIC"
-  -p teammate_pose_topic:="$TEAMMATE_TOPIC"
-  -p opponent_pose_topic:="$OPPONENT_TOPIC"
-  -p opponent2_pose_topic:="$OPPONENT2_TOPIC"
   -p attack_goal:="$GOAL"
   -p rl_speed_limit:="$RL_SPEED_LIMIT"
   -p rl_speed_gain:="$RL_SPEED_GAIN"
@@ -126,6 +122,21 @@ ARGS=(
   -p rl_deadzone_speed_limit:="$RL_DEADZONE_SPEED_LIMIT"
   -p enable_motion:="$ENABLE_MOTION"
 )
-[[ -n "$DOG_NAME" ]] && ARGS+=(-p dog_name:="$DOG_NAME")
+
+# 可选参数：rcl 不接受 `-p name:=` 这种空值（会报
+# "Couldn't parse parameter override rule" 并直接退出），空值必须整条省略。
+add_opt() {
+  if [[ -n "$2" ]]; then ARGS+=(-p "$1:=$2"); fi
+  return 0
+}
+if [[ -n "$RL_MODEL_PATH" && ! -f "$RL_MODEL_PATH" ]]; then
+  echo "警告：RL_MODEL_PATH=$RL_MODEL_PATH 不存在，改用包内默认权重。" >&2
+else
+  add_opt rl_model_path "$RL_MODEL_PATH"
+fi
+add_opt dog_name "$DOG_NAME"
+add_opt teammate_pose_topic "$TEAMMATE_TOPIC"
+add_opt opponent_pose_topic "$OPPONENT_TOPIC"
+add_opt opponent2_pose_topic "$OPPONENT2_TOPIC"
 
 exec ros2 run pkg_soccer soccer --ros-args "${ARGS[@]}"

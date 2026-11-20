@@ -109,10 +109,14 @@ scp -r _dd/src/pkg_soccer/pkg_soccer _dd/src/pkg_soccer/resource \
 
 ```bash
 cd ~/lizj
-source /opt/ros/galactic/setup.bash
+source /opt/ros2/galactic/setup.bash     # 本机 ROS 装在 /opt/ros2/galactic（不是 /opt/ros）
 colcon build --packages-select pkg_soccer        # 首次编译约 10 s
 source install/setup.bash
 ```
+
+> 本机 Python 是 **3.6**（`/opt/ros2/galactic/lib/python3.6/...`）。代码里不能用
+> 海象运算符 `:=`、内建泛型注解 `list[...]` 等 3.8+ 语法，否则节点在 import 阶段
+> 直接 `SyntaxError`。`rl_control.py` 已按此改过。
 
 编译成功的标志是这两条都有输出：
 
@@ -329,6 +333,7 @@ ros2 topic echo /vrpn/ball/pose --once
 
 | 现象 | 常见原因 |
 |---|---|
+| `RCLError: Couldn't parse parameter override rule: '-p rl_model_path:='` | 空值参数被 rcl 拒绝。`start.sh` 已改成"空值整条省略"；手写命令时别写 `-p rl_model_path:=`（留空就别传这个参数） |
 | `install/setup.bash: line N: COLCON_TRACE: unbound variable` | 脚本在 `set -u` 下 source colcon 环境。用 4bb1b55 之后的 `start.sh`（source 前后 `set +u` / `set -u`）；手改的话就是把 `source` 那行包在 `set +u` 和 `set -u` 之间 |
 | 节点起来但狗不动，日志 `WAIT_POSE` | 位姿话题断流、坐标系不一致（`frame_id` 不同）、球/狗刚体名写错；`shared_2v2` 还会要求队友和两个对手都有数据 |
 | 日志 `等待连续动捕数据` | VRPN 刚起，等 3~5 帧即可；持续出现说明丢包严重 |
