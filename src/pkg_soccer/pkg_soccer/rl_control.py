@@ -22,8 +22,13 @@ class Actor:
     def __init__(self, path=''):
         path = Path(path) if path else Path(__file__).with_name('policy_stage2_actor.npz')
         with np.load(path, allow_pickle=False) as weights:
-            indices = sorted(int(m.group(1)) for key in weights.files
-                            if (m := re.fullmatch(r'actor_(\d+)_weight', key)))
+            # 不用海象运算符：狗上若是 Python 3.6 会直接 SyntaxError。
+            indices = []
+            for key in weights.files:
+                match = re.fullmatch(r'actor_(\d+)_weight', key)
+                if match:
+                    indices.append(int(match.group(1)))
+            indices.sort()
             if not indices or indices[0] != 0 or any(i % 2 for i in indices):
                 raise ValueError('RL 模型 actor 层索引无效')
             if indices != list(range(0, indices[-1] + 1, 2)):
