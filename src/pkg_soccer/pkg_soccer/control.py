@@ -209,6 +209,20 @@ class Controller:
         return any(math.hypot(x - px, y - py) <= tol
                    for px, py in self.service_points())
 
+    def ball_at_restart_region(self, x, y, tolerance=0.90):
+        """球是否在靠近边界的随机重发区域内。
+
+        裁判实际发球点不一定落在九宫格标记上；允许球停在距任一边界
+        ``tolerance`` 米以内的位置。门口中路不算端线危险区。
+        """
+        fx, fy = self.field_coordinates(x, y)
+        near_side = (fy <= self.cfg.field_min_y + tolerance or
+                     fy >= self.cfg.field_max_y - tolerance)
+        near_end = (fx <= self.cfg.field_min_x + tolerance or
+                    fx >= self.cfg.field_max_x - tolerance)
+        outside_goal_mouth = abs(fy) > self.cfg.goal_width / 2.0
+        return near_side or (near_end and outside_goal_mouth)
+
     def pause_play(self, now, reason):
         """进球/出界/死区：停车等裁判发球，不结束比赛。"""
         if self.finished:
@@ -240,7 +254,7 @@ class Controller:
         # 兜底：暂停过久且球已静止在场内（裁判漏放或球自己滚回来），别再干等。
         if self.pause_since is not None and now - self.pause_since >= c.resume_timeout:
             return True
-        if not self.ball_at_service_point(b.x, b.y):
+        if not self.ball_at_restart_region(b.x, b.y):
             self.service_since = None
             return False
         if self.service_since is None:
@@ -342,6 +356,13 @@ class Controller:
                 d.frame == b.frame and
                 0 <= now - d.received <= c.pose_timeout and
                 0 <= now - b.received <= c.pose_timeout)
+
+    def field_coordinates(self, x, y):
+        """Convert mocap coordinates into the configured field frame."""
+        c = self.cfg
+        dx, dy = x - c.field_center_x, y - c.field_center_y
+        co, si = math.cos(c.field_yaw), math.sin(c.field_yaw)
+        return co*dx + si*dy, -si*dx + co*dy
 
     def inside_field(self, x, y):
         """场地范围包括球门后的小块区域，供越线判定。"""

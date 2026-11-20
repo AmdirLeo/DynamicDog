@@ -291,17 +291,14 @@ class RLController(Controller):
             if not dead and not deadlock:
                 return False
             self.referee_origin = (b.x, b.y)
-            points = [(x, y) for x in (-2.5, 0., 2.5) for y in (-1.25, 0., 1.25)]
-            self.referee_target = min(points, key=lambda p: (p[0]-bx)**2+(p[1]-by)**2)
+            # 裁判发球点是靠近出界位置的随机点，不假设九宫格标记一定存在。
+            self.referee_target = None
             self.referee_moved = False
             self.referee_settled = None
             self.contact_seen = False
         moved = math.hypot(b.x-self.referee_origin[0], b.y-self.referee_origin[1]) > .15
         self.referee_moved |= moved
-        target_distance = math.hypot(bx-self.referee_target[0], by-self.referee_target[1])
-        placed = (self.referee_moved and not dead and
-                  target_distance < .50 and
-                  self.tracks['ball'].speed < .08)
+        placed = (self.referee_moved and self.tracks['ball'].speed < .08)
         self.referee_settled = (now if self.referee_settled is None else
                                 self.referee_settled) if placed else None
         if self.referee_settled is not None and now-self.referee_settled >= .5:
@@ -309,14 +306,12 @@ class RLController(Controller):
             self.referee_settled = self.deadlock_since = None
             self.wait_for_pose('重发球已确认，重新确认连续定位')
         else:
-            wx, wy = self.world_coordinates(*self.referee_target)
             self.state = 'WAIT_REFEREE'
             self.reason = ('死区/僵持：等待裁判将球放到最近发球点 '
-                           f'mocap=({wx:.2f},{wy:.2f}) 米（与 ball 日志同坐标系）；'
-                           f'当前偏差={target_distance:.2f}m，要求<0.50m；'
+                           '附近的随机位置（与 ball 日志同坐标系）；'
+                           f'球已移动={self.referee_moved}；'
                            f'球速={self.tracks["ball"].speed:.2f}m/s，要求<0.08m/s 持续0.5s；'
-                           f'球场坐标=({self.referee_target[0]:.2f},'
-                           f'{self.referee_target[1]:.2f})')
+                           f'球场坐标=({bx:.2f},{by:.2f})')
         return True
 
     def _command(self, now):

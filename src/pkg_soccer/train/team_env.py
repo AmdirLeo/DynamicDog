@@ -303,15 +303,36 @@ class TeamEnv:
                 self.pos[i] = self._clip_dog(home + self.rng.normal(0, 0.05, 2))
                 self.yaw[i] = float(self.rng.uniform(-math.pi, math.pi))
         else:
-            nearest = min(SERVICE_POINTS,
-                          key=lambda p: (p[0] - self.ball[0]) ** 2 +
-                                        (p[1] - self.ball[1]) ** 2)
-            self.ball = np.array(nearest, dtype=float)
+            self.ball = self._random_boundary_restart()
             for i in range(4):
                 self.pos[i] = self._clip_dog(self.pos[i])
         self.ball_v[:] = 0.0
         self.v_body[:] = 0.0
         self.w[:] = 0.0
+
+    def _random_boundary_restart(self):
+        """裁判将死区/出界球随机放在原出界点附近的场内位置。
+
+        现场发球点是靠近边界的临时位置，不保证落在训练场地的九宫格标记上。
+        保留原球最接近的边界方向，并在 0.08--0.75 m 的内缩距离和切向位置上
+        随机化，避免策略只记住固定发球点。
+        """
+        x, y = float(self.ball[0]), float(self.ball[1])
+        side_gap = min(abs(y - MIN_Y), abs(MAX_Y - y))
+        end_gap = min(abs(x - MIN_X), abs(MAX_X - x))
+        inward = float(self.rng.uniform(0.08, 0.75))
+        if side_gap <= end_gap:
+            side = 1.0 if y >= 0.0 else -1.0
+            rx = float(self.rng.uniform(MIN_X + 0.45, MAX_X - 0.45))
+            ry = (MAX_Y - inward) if side > 0 else (MIN_Y + inward)
+            return np.array([rx, ry], dtype=float)
+        side = 1.0 if x >= 0.0 else -1.0
+        ry = float(self.rng.uniform(GOAL_WIDTH / 2.0 + 0.08,
+                                    MAX_Y - 0.20))
+        if self.rng.random() < 0.5:
+            ry = -ry
+        rx = (MAX_X - inward) if side > 0 else (MIN_X + inward)
+        return np.array([rx, ry], dtype=float)
 
     def _sample_domain(self):
         c = self.cfg
