@@ -130,8 +130,18 @@ TEAM_B_2=/vrpn/team_b_2/pose
   和动捕刚体名（`/vrpn/Lizj_dog/pose`）是**两件事**。默认值
   `mi_desktop_48_b0_2d_7b_03_fd` 只是占位，填错的话指令发到不存在的 topic，
   **狗一步不动且没有任何报错**。
-- 四个 VRPN 话题里只要有一个还是占位值，`start.sh` 会直接退出（防止拿错话题上场）。
-  台架只测本狗时加 `SKIP_TOPIC_CHECK=1` 跳过这个检查。
+- `start.sh` 的话题检查**按策略判定**，只查当前策略真正用到的通道（缺哪条会逐条列出来）：
+
+  | `RL_POLICY` | 维度 | 必须有的通道 |
+  |---|---|---|
+  | `stage2` | 23 | 本狗 + 球 |
+  | `attacker` / `defender` | 29 | 本狗 + 球 + 1 个对手（1v1） |
+  | `shared_2v2` / `shared_2v2_large` | 41 | 本狗 + 球 + 队友 + 2 个对手（2v2） |
+
+  所以现场只有两只狗时，用 `RL_POLICY=duel_attacker ./start.sh A2` 就能跑，
+  不必为了凑队友去填假话题。台架只接本狗时加 `SKIP_TOPIC_CHECK=1`。
+- 两个**只告警不拦截**的结构性问题：队友/对手话题与本狗话题相同（策略会把自己当成别人）、
+  `shared_2v2` 下两个对手话题相同（次近对手槽位重复同一只狗）。
 - 也可以用环境变量临时覆盖，不改文件：
   `DOG_NAME=xxx TEAM_A_1=/vrpn/Lizj_dog/pose ./start.sh A1`
 - 写法必须是 `${VAR:-默认值}`（冒号 + 减号）。写成 `${VAR:默认值}` 会被 bash 当成
@@ -139,9 +149,9 @@ TEAM_B_2=/vrpn/team_b_2/pose
   其实是少了那个 `-`。
 
 > ⚠️ `shared_2v2`（41 维）要求 **dog / ball / teammate / opponent / opponent2 五路都有数据**，
-> 少一路就永久停在 `WAIT_POSE`（日志会打印缺哪一路）。台架只接本狗 + 球时，
-> 用 `RL_POLICY=stage2 ENABLE_MOTION=false SKIP_TOPIC_CHECK=1 ./start.sh A1`
-> 先把链路跑通（23 维，只要 dog+ball）。
+> 少一路就永久停在 `WAIT_POSE`（日志会打印缺哪一路）。只有两只狗时用
+> `RL_POLICY=duel_attacker`（29 维）；只有本狗 + 球时用
+> `RL_POLICY=stage2 ENABLE_MOTION=false ./start.sh A1` 先把链路跑通。
 
 ### 2.4 启动顺序
 
