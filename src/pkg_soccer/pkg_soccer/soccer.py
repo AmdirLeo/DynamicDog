@@ -79,7 +79,9 @@ class Soccer(Node):
                       self.param('rl_speed_limit', 1.2)), self.rl_policy,
                 # 0 = 自动：满舵前进恰好等于 rl_speed_limit（shared_2v2 的
                 # 0.45 档 → ×2.667 = 1.2 m/s）。转向不放大。
-                speed_gain=float(self.param('rl_speed_gain', 0.0)))
+                speed_gain=float(self.param('rl_speed_gain', 0.0)),
+                continue_deadzone=bool(self.param('rl_continue_deadzone', True)),
+                deadzone_speed_limit=float(self.param('rl_deadzone_speed_limit', 0.35)))
         self.enable_motion = self.param('enable_motion', False)
         if type(self.enable_motion) is not bool:
             raise ValueError('enable_motion 必须为 true/false')
@@ -672,7 +674,7 @@ class Soccer(Node):
                 self.report(now, 'WAIT_POSE', self.pose_wait_reason(now), Controller.ZERO)
             return
         velocity = c.command(now)
-        if c.finished or c.state in ('WAIT_POSE', 'WAIT_REFEREE', 'WAIT_PLAY'):
+        if c.finished or c.state in ('WAIT_POSE', 'WAIT_PLAY'):
             self.end_motion()
         else:
             self.publish(velocity)

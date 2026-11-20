@@ -74,7 +74,8 @@ class RLController(Controller):
     """Reuse goal detection, field checks, turn feedback and ROS posture gate."""
 
     def __init__(self, config, model_path='', speed_limit=0.30, policy='stage2',
-                 speed_gain=1.0):
+                 speed_gain=1.0, continue_deadzone=True,
+                 deadzone_speed_limit=0.35):
         super().__init__(config)
         if policy not in ('stage2', 'attacker', 'defender', 'shared_2v2', 'shared_2v2_large'):
             raise ValueError('rl_policy 必须为 stage2/attacker/defender/shared_2v2/shared_2v2_large')
@@ -101,6 +102,12 @@ class RLController(Controller):
                 self.actor.role != policy):
             raise ValueError('rl_policy 与模型观测维度或角色不一致')
         self.speed_limit = speed_limit
+        self.continue_deadzone = bool(continue_deadzone)
+        self.deadzone_speed_limit = float(deadzone_speed_limit)
+        if (not math.isfinite(self.deadzone_speed_limit) or
+                not 0.0 < self.deadzone_speed_limit <= self.speed_limit):
+            raise ValueError('deadzone_speed_limit 必须在 (0, rl_speed_limit]')
+        self.deadzone_active = False
         scale = np.asarray(self.actor.scale, np.float32)
         if self.speed_gain <= 0.0:
             self.speed_gain = (float(speed_limit)/scale[0]
@@ -356,7 +363,9 @@ class RLController(Controller):
             if bx <= -gx-c.ball_radius:
                 self.pause_play(now, '球已越过本方门线，等待裁判发球')
                 return self.ZERO
-        if self.duel and self.referee_wait(now):
+        deadzone_wait = self.duel and self.referee_wait(now)
+        self.deadzone_active = bool(deadzone_wait)
+        if deadzone_wait and not self.continue_deadzone:
             if self.attack_planner:
                 self.attack_planner.reset()
             return self.ZERO
@@ -389,6 +398,8 @@ class RLController(Controller):
         speed = float(np.linalg.norm(velocity[:2]))
         if speed > self.speed_limit:
             velocity[:2] *= self.speed_limit/speed
+        if self.deadzone_active and speed > self.deadzone_speed_limit:
+            velocity[:2] *= self.deadzone_speed_limit/max(speed, 1e-9)
         velocity[2] = np.clip(velocity[2], -c.turn_speed, c.turn_speed)
         co, si = math.cos(d.yaw), math.sin(d.yaw)
         wx, wy = co*velocity[0]-si*velocity[1], si*velocity[0]+co*velocity[1]
@@ -397,6 +408,11 @@ class RLController(Controller):
             if not self.inside_field(d.x+float(vx)*.5, d.y+float(vy)*.5):
                 self.stop('RL 预计运动将越过场地边界')
                 return self.ZERO
-        self.state, self.reason = mode, reason
+        if self.deadzone_active:
+            self.state = 'DEADZONE_MOVE'
+            self.reason = ('球在死区，继续低速运动；等待裁判将球放回发球点，'
+                           f'死区速度上限={self.deadzone_speed_limit:.2f}m/s')
+        else:
+            self.state, self.reason = mode, reason
         self.target_yaw = None  # PPO outputs angular velocity, not a target heading.
         return tuple(float(v) for v in velocity)
