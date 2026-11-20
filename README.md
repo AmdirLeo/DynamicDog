@@ -10,63 +10,155 @@ ROS 2 足球比赛主程序：两只狗各跑一份**同一套 41 维强化学�
 
 ## 1. 目录结构
 
+**仓库根**（训练/启动辅助，不需要装进包）：
+
 ```
 DynamicDog/
 ├── start.sh                    # 比赛启动脚本（按 A1/A2/B1/B2 选角色）
 ├── train_2v2_large.py          # 4 狗共享策略的 PPO 训练器（PyTorch，独立仿真）
-├── policy_2v2_shared.pt        # 训练产物（PyTorch 权重）
-└── src/pkg_soccer/
-    ├── pkg_soccer/
-    │   ├── soccer.py            # 主节点：话题、姿态门控、比赛循环
-    │   ├── rl_control.py        # 策略加载、41 维观测、速度/短冲、暂停恢复
-    │   ├── control.py           # 状态机基类：场地几何、发球点、暂停/复位
-    │   ├── attack.py            # 可选进攻规划（混合控制）
-    │   ├── stand_guard.py       # 姿态门控（坐/趴/站、故障检测）
-    │   ├── measurement.py       # 位姿轨迹与速度估计
-    │   ├── policy_2v2_shared_actor.npz      # 部署用策略（41 维，0.45 档）
-    │   ├── policy_duel_*_actor.npz          # 旧 1v1 策略（29 维）
-    │   └── policy_stage2_actor.npz          # 旧单狗策略（23 维）
-    ├── train/                   # 早期训练套件（槽位顺序与当前部署不同，见 §6）
-    ├── runs/                    # 历史实验权重与配置
-    └── 训练指南.md
+├── policy_2v2_shared.pt        # 训练产物（PyTorch 权重，只在训练侧用）
+└── src/pkg_soccer/             # ← 这个目录才要放到狗的工作区里
 ```
+
+**包内部**（狗上必须是这个结构，`ament_python` 的固定约定）：
+
+```
+src/pkg_soccer/                      ← 包根，名字随便，但里面要有下面四项
+├── pkg_soccer/                      ← Python 模块目录（有 __init__.py）
+│   ├── __init__.py
+│   ├── soccer.py                    # 主节点：话题、姿态门控、比赛循环
+│   ├── rl_control.py                # 策略加载、41 维观测、速度/短冲、暂停恢复
+│   ├── control.py                   # 状态机基类：场地几何、发球点、暂停/复位
+│   ├── attack.py                    # 进攻规划（rl_policy:=attacker 时才 import）
+│   ├── stand_guard.py               # 姿态门控（坐/趴/站、故障检测）
+│   ├── measurement.py               # 位姿轨迹与速度估计
+│   ├── record_motion.py             # 位姿录制小工具
+│   ├── policy_2v2_shared_actor.npz  # ★ 部署用策略（41 维，0.45 档）
+│   ├── policy_duel_*_actor.npz      # 旧 1v1 策略（29 维）
+│   ├── policy_stage2_actor.npz      # 旧单狗策略（23 维）
+│   ├── policy_team_attacker_actor.npz  # 我们训的旧 41 维（槽位顺序不同，见 §6）
+│   └── leg_kick.py / gait_kick*.py / kick_*.py   # 踢腿标定独立脚本（主程序已不 import）
+├── resource/
+│   └── pkg_soccer                   # ★ 空文件，ament_index 标记，缺了 ros2 run 找不到包
+├── package.xml
+├── setup.cfg
+├── setup.py                         # package_data 里必须列上要安装的 .npz
+├── train/                           # 训练套件（不安装，留作记录）
+├── runs/                            # 历史实验权重（不安装）
+└── 训练指南.md
+```
+
+> ⚠️ 本地 `机器狗足球/pkg_soccer/` 是**摊平的编辑视图**（`setup.py` 和 `soccer.py` 在同一层），
+> 直接 `scp` 到狗上会缺 `pkg_soccer/` 这一层模块目录，`colcon build` 会报
+> `Multiple top-level packages` 或 `No module named pkg_soccer.soccer`。
+> **部署请用仓库里的 `src/pkg_soccer/`（即 `_dd/src/pkg_soccer/`）。**
 
 ---
 
-## 2. 快速开始
+## 2. 上狗部署
 
-### 2.1 编译
+### 2.1 放到狗上
+
+狗上的工作区（SSH 进去 `ls` 能看到 `build/ install/ log/ src/` 的那个目录，
+从截图看是 `~/LIZJ`）：
+
+```
+~/LIZJ/
+├── build/  install/  log/
+└── src/
+    ├── myinterface_pkg/      # 别的包，不要动
+    └── pkg_soccer/           # ← 换成新的
+```
+
+**方式 A：狗上直接 clone（能上外网时最省事）**
 
 ```bash
-cd ~/A_ws            # 你的 colcon 工作区（start.sh 默认 source ~/A_ws/install/setup.bash）
-colcon build --packages-select pkg_soccer
+cd ~/LIZJ
+mv src/pkg_soccer src/pkg_soccer.old.$(date +%m%d)    # 先备份旧包
+git clone --depth 1 https://github.com/AmdirLeo/DynamicDog.git /tmp/dd
+cp -r /tmp/dd/src/pkg_soccer src/
+cp /tmp/dd/start.sh ~/LIZJ/
+```
+
+**方式 B：从 Windows 用 scp 传**
+
+```bash
+# 在 Windows 的 Git Bash 里执行
+cd "E:/机器狗程序调试区"
+scp -r _dd/src/pkg_soccer mi@<狗IP>:~/LIZJ/src/
+scp _dd/start.sh mi@<狗IP>:~/LIZJ/
+```
+
+只传必要文件（省时间，不传 runs/train）：
+
+```bash
+scp -r _dd/src/pkg_soccer/pkg_soccer _dd/src/pkg_soccer/resource \
+       _dd/src/pkg_soccer/package.xml _dd/src/pkg_soccer/setup.py \
+       _dd/src/pkg_soccer/setup.cfg mi@<狗IP>:~/LIZJ/src/pkg_soccer/
+```
+
+> 老版本里没有 `attack.py` 和 `policy_2v2_shared_actor.npz`，这两个必须带上，
+> 否则 `rl_policy:=shared_2v2` 启动时会 `FileNotFoundError`。
+
+### 2.2 编译
+
+```bash
+cd ~/LIZJ
+source /opt/ros/galactic/setup.bash
+colcon build --packages-select pkg_soccer        # 首次编译约 10 s
 source install/setup.bash
 ```
 
-### 2.2 填话题
-
-`start.sh` 顶部有四个话题变量，**必须按当天动捕的实际刚体名改**：
+编译成功的标志是这两条都有输出：
 
 ```bash
-TEAM_A_1=/vrpn/xll_dog/pose      # A 队 1 号（本机）
-TEAM_A_2=/vrpn/team_a_2/pose     # A 队 2 号
-TEAM_B_1=/vrpn/team_b_1/pose     # B 队 1 号
-TEAM_B_2=/vrpn/team_b_2/pose     # B 队 2 号
+ros2 pkg prefix pkg_soccer                      # → /home/mi/LIZJ/install/pkg_soccer
+ros2 pkg executables pkg_soccer                 # → pkg_soccer soccer
 ```
 
-仍然是占位值时脚本会直接报错退出（防止拿错话题上场）。
-
-### 2.3 启动
+### 2.3 改 `start.sh`（三处，缺一不可）
 
 ```bash
-# 只推理、不发运动指令（第一次上狗/换场地先用这个核对观测）
-ENABLE_MOTION=false ./start.sh A1
+DOG_NAME=mi_desktop_48_b0_2d_5f_bd_98   # ★ 本机运控命名空间，查：ros2 topic list | grep motion_status
+TEAM_A_1=/vrpn/Lizj_dog/pose            # ★ 本机狗刚体，查：ros2 topic list | grep vrpn
+TEAM_A_2=/vrpn/team_a_2/pose            # 队友/对手刚体名按当天动捕建的名字填
+TEAM_B_1=/vrpn/team_b_1/pose
+TEAM_B_2=/vrpn/team_b_2/pose
+```
 
-# 真正比赛
+- `DOG_NAME` 是**运控接口**的命名空间（`/<DOG_NAME>/motion_servo_cmd`），
+  和动捕刚体名（`/vrpn/Lizj_dog/pose`）是**两件事**。默认值
+  `mi_desktop_48_b0_2d_7b_03_fd` 只是占位，填错的话指令发到不存在的 topic，
+  **狗一步不动且没有任何报错**。
+- 四个 VRPN 话题里只要有一个还是占位值，`start.sh` 会直接退出（防止拿错话题上场）。
+- 也可以用环境变量临时覆盖，不改文件：
+  `DOG_NAME=xxx TEAM_A_1=/vrpn/Lizj_dog/pose ./start.sh A1`
+
+### 2.4 启动顺序
+
+```bash
+# ① 先起动捕（另开一个终端，或在别的机器上）
+ros2 launch vrpn_listener sync_entity_state.launch
+ros2 topic list | grep vrpn                     # 确认 4 只狗 + 球的 pose 都在
+
+# ② 空跑：只推理、不发运动指令（换场地/换话题必做）
+cd ~/LIZJ && ENABLE_MOTION=false ./start.sh A1
+
+# ③ 真跑
 ENABLE_MOTION=true ./start.sh A1
 ```
 
-四个角色的区别只有"自己是哪只、队友是谁、进攻方向"：
+`ENABLE_MOTION=false` 时节点照常算策略、打日志（`|v|`、状态、观测是否齐全），
+只是不往 `motion_servo_cmd` 发东西。第一次到新场地，先这样核对：
+
+```bash
+ros2 topic echo /vrpn/Lizj_dog/pose --once      # 狗刚体有数据
+ros2 topic echo /vrpn/ball/pose --once          # 球刚体有数据
+```
+
+日志里出现 `WAIT_POSE ... 等待同坐标系连续有效位姿` 就是上面某个话题没通。
+
+### 2.5 四个角色
 
 | 角色 | 本狗 | 队友 | 对手 | 进攻方向 |
 |---|---|---|---|---|
@@ -75,7 +167,7 @@ ENABLE_MOTION=true ./start.sh A1
 | `B1` | TEAM_B_1 | TEAM_B_2 | A1 + A2 | `goal_left` |
 | `B2` | TEAM_B_2 | TEAM_B_1 | A1 + A2 | `goal_left` |
 
-**两只狗必须用不同角色启动**，队友话题指向对方，否则两只狗会把彼此当成对手。
+同一队的两只狗必须用不同角色（`A1` / `A2`），队友话题互指；两只都用 `A1` 会把彼此当对手。
 
 ---
 
