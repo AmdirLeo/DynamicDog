@@ -9,11 +9,14 @@ from .control import wrap_angle
 class Track:
     """约 0.1 秒滑窗回归速度，拒绝断流、跳点和跨坐标系差分。"""
 
-    def __init__(self, max_speed, gap=0.20):
+    def __init__(self, max_speed, gap=0.20, prediction_gap=0.60):
         self.max_speed, self.gap = max_speed, gap
+        self.prediction_gap = prediction_gap
         self.samples = deque()
         self.latest = None
         self.velocity = None
+        self.acceleration = (0.0, 0.0, 0.0)
+        self._velocity_time = None
         self.basis = ''
         self.quality = 'missing'
 
@@ -30,8 +33,12 @@ class Track:
         self.latest = (now, stamp, x, y, yaw, frame)
         if previous is not None:
             dt = now - previous[0]
-            if frame != previous[5] or dt <= 0 or dt > self.gap:
+            if frame != previous[5] or dt <= 0:
                 self.invalidate('gap_or_frame_change')
+            elif dt > self.gap:
+                # 保留最后速度，供短时外推；新帧到来后重新建立回归速度。
+                self.samples.clear()
+                self.quality = 'gap'
             elif stamp > 0 and previous[1] > 0 and stamp < previous[1]:
                 self.invalidate('source_clock_reset')
             elif math.hypot(x-previous[2], y-previous[3]) > self.max_speed*dt + .03:
@@ -43,7 +50,6 @@ class Track:
         while len(self.samples) > 2 and now-self.samples[1][0] >= .10:
             self.samples.popleft()
         if len(self.samples) < 3 or now-self.samples[0][0] < .08:
-            self.velocity = None
             return
         # 一些 VRPN 发布端复用 stamp；此时用本机单调接收时间并明确标记。
         points = list(self.samples)
@@ -56,9 +62,15 @@ class Track:
         ts = [p[axis]-points[0][axis] for p in points]
         mean = sum(ts)/len(ts)
         denom = sum((t-mean)**2 for t in ts)
-        self.velocity = tuple(sum((t-mean)*(p[j]-points[0][j])
+        new_velocity = tuple(sum((t-mean)*(p[j]-points[0][j])
                                   for t, p in zip(ts, points))/denom
                               for j in (2, 3, 4))
+        if self.velocity is not None and self._velocity_time is not None:
+            dtv = max(now - self._velocity_time, 1e-6)
+            self.acceleration = tuple((new_velocity[j] - self.velocity[j]) / dtv
+                                      for j in range(3))
+        self.velocity = new_velocity
+        self._velocity_time = now
         if math.hypot(*self.velocity[:2]) > self.max_speed:
             self.invalidate('velocity_outlier')
         else:
@@ -66,7 +78,24 @@ class Track:
 
     def valid(self, now):
         return (self.latest is not None and self.velocity is not None and
-                self.quality == 'ok' and 0 <= now-self.latest[0] <= self.gap)
+                self.quality in ('ok', 'gap') and
+                0 <= now-self.latest[0] <= self.gap + self.prediction_gap)
+
+    def predict(self, now):
+        """Return a short constant-acceleration extrapolation from the last frame."""
+        if (self.latest is None or self.velocity is None or
+                self.quality not in ('ok', 'gap')):
+            return None
+        age = now - self.latest[0]
+        if age < 0 or age > self.gap + self.prediction_gap:
+            return None
+        x, y, yaw = self.latest[2], self.latest[3], self.latest[4]
+        vx, vy, wz = self.velocity
+        ax, ay, aw = self.acceleration
+        return (x + vx*age + .5*ax*age*age,
+                y + vy*age + .5*ay*age*age,
+                yaw + wz*age + .5*aw*age*age,
+                vx + ax*age, vy + ay*age, wz + aw*age)
 
     @property
     def speed(self):

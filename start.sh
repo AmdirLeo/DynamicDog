@@ -4,13 +4,21 @@ set -euo pipefail
 # 2v2 shared-policy launcher.
 #   1) 首次使用：改 DOG_NAME 和四个 VRPN 话题（或用同名环境变量覆盖）
 #   2) 启动：./start.sh A1|A2|B1|B2
+#      默认 A1/B1=attack、A2/B2=assist；可用 TEAM_ROLE 覆盖。
 ROLE="${1:-A1}"
 ENABLE_MOTION="${ENABLE_MOTION:-false}"
 RL_POLICY="${RL_POLICY:-shared_2v2}"
+TEAM_ROLE="${TEAM_ROLE:-}"
+RL_AUTO_ROLE_SWITCH="${RL_AUTO_ROLE_SWITCH:-true}"
 RL_MODEL_PATH="${RL_MODEL_PATH:-}"
-# 最高速度（m/s）：策略是 0.45 档，默认按此值把动作放大（0.45 × 2.667 = 1.2）。
-RL_SPEED_LIMIT="${RL_SPEED_LIMIT:-1.2}"
-# 0 = 按 RL_SPEED_LIMIT 自动标定；想复现策略原始 0.45 速度就设 1.0
+RL_ATTACK_MODEL_PATH="${RL_ATTACK_MODEL_PATH:-}"
+RL_ASSIST_MODEL_PATH="${RL_ASSIST_MODEL_PATH:-}"
+# 若实测胸部相对刚体中心有偏差，可按每只狗单独覆盖（单位米）；留空使用权重中的标定值。
+CONTACT_OFFSET_X="${CONTACT_OFFSET_X:-}"
+CONTACT_OFFSET_Y="${CONTACT_OFFSET_Y:-}"
+# 当前实机保守速度（m/s）：先用 0.45，避免高速动捕偏移。
+RL_SPEED_LIMIT="${RL_SPEED_LIMIT:-0.45}"
+# 0 = 按 RL_SPEED_LIMIT 自动标定；设 1.0 可复现权重原始动作档。
 RL_SPEED_GAIN="${RL_SPEED_GAIN:-0}"
 # 球进死区时仍继续低速走位；设为 false 可恢复等待裁判时停住。
 RL_CONTINUE_DEADZONE="${RL_CONTINUE_DEADZONE:-true}"
@@ -33,6 +41,14 @@ case "$ROLE" in
   B2) DOG_TOPIC="$TEAM_B_2"; TEAMMATE_TOPIC="$TEAM_B_1"; OPPONENT_TOPIC="$TEAM_A_1"; OPPONENT2_TOPIC="$TEAM_A_2"; GOAL=goal_left ;;
   *) echo "用法：$0 A1|A2|B1|B2" >&2; exit 2 ;;
 esac
+
+# 默认每队一攻一支援；需要更换初始主攻狗时显式设 TEAM_ROLE=attack/assist。
+if [[ -z "$TEAM_ROLE" ]]; then
+  case "$ROLE" in
+    A1|B1) TEAM_ROLE="attack" ;;
+    A2|B2) TEAM_ROLE="assist" ;;
+  esac
+fi
 
 # 占位话题判定（只有这几条默认值算"没填"）
 is_placeholder() {
@@ -114,6 +130,8 @@ fi
 ARGS=(
   -p control_mode:=rl
   -p rl_policy:="$RL_POLICY"
+  -p team_role:="$TEAM_ROLE"
+  -p rl_auto_role_switch:="$RL_AUTO_ROLE_SWITCH"
   -p dog_pose_topic:="$DOG_TOPIC"
   -p attack_goal:="$GOAL"
   -p rl_speed_limit:="$RL_SPEED_LIMIT"
@@ -133,6 +151,10 @@ if [[ -n "$RL_MODEL_PATH" && ! -f "$RL_MODEL_PATH" ]]; then
   echo "警告：RL_MODEL_PATH=$RL_MODEL_PATH 不存在，改用包内默认权重。" >&2
 else
   add_opt rl_model_path "$RL_MODEL_PATH"
+add_opt rl_attack_model_path "$RL_ATTACK_MODEL_PATH"
+add_opt rl_assist_model_path "$RL_ASSIST_MODEL_PATH"
+add_opt ball_contact_offset_x "$CONTACT_OFFSET_X"
+add_opt ball_contact_offset_y "$CONTACT_OFFSET_Y"
 fi
 add_opt dog_name "$DOG_NAME"
 add_opt teammate_pose_topic "$TEAMMATE_TOPIC"

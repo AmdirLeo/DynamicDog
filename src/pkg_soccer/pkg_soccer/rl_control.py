@@ -40,12 +40,22 @@ class Actor:
             if self.obs_dim not in (23, 29, 41):
                 raise ValueError('RL 模型观测维度必须为 23、29 或 41')
             self.role = str(weights['role'].item()) if 'role' in weights else 'stage2'
+            self.layout = (str(weights['obs_layout'].item()) if 'obs_layout' in weights
+                           else {23: 'single', 29: '1v1', 41: '2v2'}.get(self.obs_dim, 'unknown'))
+            self.contact_offset = (tuple(np.asarray(weights['contact_offset'], np.float32).reshape(2))
+                                  if 'contact_offset' in weights else None)
             if self.obs_dim in (29, 41):
-                allowed = ('attacker', 'defender') if self.obs_dim == 29 else ('shared_2v2', 'shared_2v2_large')
+                allowed = ('attacker', 'assist', 'defender') if self.obs_dim == 29 else (
+                    'shared_2v2', 'shared_2v2_large', 'attack', 'attacker',
+                    'assist', 'defender')
                 if (self.role not in allowed or
                         'action_scale' not in weights or
-                        not np.allclose(weights['action_scale'], self.scale)):
+                        np.asarray(weights['action_scale']).shape != (3,) or
+                        not np.isfinite(weights['action_scale']).all() or
+                        np.any(np.asarray(weights['action_scale']) <= 0) or
+                        float(np.asarray(weights['action_scale'])[0]) > 1.5):
                     raise ValueError('29 维权重缺少角色或动作比例不匹配')
+                self.scale = np.asarray(weights['action_scale'], np.float32).copy()
             self.layers = []
             previous = self.obs_dim
             for index in indices:
@@ -75,13 +85,18 @@ class RLController(Controller):
 
     def __init__(self, config, model_path='', speed_limit=0.30, policy='stage2',
                  speed_gain=1.0, continue_deadzone=True,
-                 deadzone_speed_limit=0.35):
+                 deadzone_speed_limit=0.35, team_role='attack',
+                 attack_model_path='', assist_model_path='', auto_role_switch=True):
         super().__init__(config)
         if policy not in ('stage2', 'attacker', 'defender', 'shared_2v2', 'shared_2v2_large'):
             raise ValueError('rl_policy 必须为 stage2/attacker/defender/shared_2v2/shared_2v2_large')
         self.policy = policy
         self.duel = policy != 'stage2'
         self.team2v2 = policy in ('shared_2v2', 'shared_2v2_large')
+        if self.team2v2 and team_role not in ('attack', 'assist'):
+            raise ValueError('2v2 team_role 必须为 attack 或 assist')
+        self.team_role = team_role if self.team2v2 else policy
+        self.auto_role_switch = bool(auto_role_switch)
         if not math.isfinite(speed_limit) or not 0 < speed_limit <= 1.5:
             raise ValueError('rl_speed_limit 必须在 (0, 1.5] m/s（协议 vel_des 上限 1.5）')
         # 策略的动作缩放来自权重（shared_2v2 是 0.45/0.20/0.70）。想要更高的
@@ -90,17 +105,41 @@ class RLController(Controller):
         # 0 = 自动：把"满舵前进"标定成正好等于 speed_limit（推荐，换权重也不用改）。
         if not (math.isfinite(self.speed_gain) and 0.0 <= self.speed_gain <= 4.0):
             raise ValueError('rl_speed_gain 必须在 [0, 4.0]（0=按 rl_speed_limit 自动标定）')
-        if not model_path and self.team2v2:
-            filename = ('policy_2v2_shared_large_actor.npz' if policy == 'shared_2v2_large'
-                        else 'policy_2v2_shared_actor.npz')
-            model_path = Path(__file__).with_name(filename)
+        self.attack_actor = self.assist_actor = None
+        if self.team2v2:
+            default_shared = Path(__file__).with_name(
+                'policy_2v2_shared_large_actor.npz' if policy == 'shared_2v2_large'
+                else 'policy_2v2_shared_actor.npz')
+            attack_path = (Path(attack_model_path) if attack_model_path else
+                           Path(model_path) if model_path else
+                           Path(__file__).with_name('policy_2v2_attack_actor.npz'))
+            assist_path = (Path(assist_model_path) if assist_model_path else
+                           Path(model_path) if model_path else
+                           Path(__file__).with_name('policy_2v2_assist_actor.npz'))
+            if not attack_path.exists():
+                attack_path = default_shared
+            if not assist_path.exists():
+                assist_path = default_shared
+            self.attack_actor = Actor(attack_path)
+            self.assist_actor = Actor(assist_path)
+            self.actor = self.attack_actor if self.team_role == 'attack' else self.assist_actor
+            model_path = str(default_shared)
         elif not model_path and self.duel:
             model_path = Path(__file__).with_name(f'policy_duel_{policy}_actor.npz')
-        self.actor = Actor(model_path)
+        if not self.team2v2:
+            self.actor = Actor(model_path)
         expected_dim = 41 if self.team2v2 else (29 if self.duel else 23)
         if (self.actor.obs_dim != expected_dim or
-                self.actor.role != policy):
+                (not self.team2v2 and self.actor.role != policy) or
+                (self.team2v2 and self.actor.role not in
+                 ('shared_2v2', 'shared_2v2_large', 'attack', 'attacker',
+                  'assist', 'defender'))):
             raise ValueError('rl_policy 与模型观测维度或角色不一致')
+        if (self.team2v2 and self.actor.contact_offset is not None and
+                math.hypot(self.cfg.ball_contact_offset_x,
+                           self.cfg.ball_contact_offset_y) < 1e-9):
+            self.cfg = self.cfg._replace(ball_contact_offset_x=float(self.actor.contact_offset[0]),
+                                         ball_contact_offset_y=float(self.actor.contact_offset[1]))
         self.speed_limit = speed_limit
         self.continue_deadzone = bool(continue_deadzone)
         self.deadzone_speed_limit = float(deadzone_speed_limit)
@@ -115,12 +154,17 @@ class RLController(Controller):
             self.speed_gain = min(max(self.speed_gain, 0.2), 4.0)
         self.effective_scale = np.array(
             [scale[0]*self.speed_gain, scale[1]*self.speed_gain, scale[2]], np.float32)
-        self.tracks = {'dog': Track(3.0), 'ball': Track(12.0)}
+        self.tracks = {'dog': Track(3.0, prediction_gap=config.prediction_timeout),
+                       'ball': Track(12.0, prediction_gap=config.prediction_timeout)}
         if self.duel:
-            self.tracks['opponent'] = Track(3.0)
+            self.tracks['opponent'] = Track(3.0, prediction_gap=config.prediction_timeout)
         if self.team2v2:
-            self.tracks['teammate'] = Track(3.0)
-            self.tracks['opponent2'] = Track(3.0)
+            self.tracks['teammate'] = Track(3.0, prediction_gap=config.prediction_timeout)
+            self.tracks['opponent2'] = Track(3.0, prediction_gap=config.prediction_timeout)
+        for name in self.tracks:
+            self._observed.setdefault(name, None)
+            self._velocity.setdefault(name, (0.0, 0.0, 0.0))
+            self._acceleration.setdefault(name, (0.0, 0.0, 0.0))
         self.opponent = None
         self.teammate = None
         self.opponent2 = None
@@ -131,6 +175,9 @@ class RLController(Controller):
         self.referee_moved = False
         self.referee_settled = None
         self.deadlock_since = None
+        self.role_switch_at = -math.inf
+        self.role_min_time = 4.0
+        self.role_cooldown = 5.0
         from .attack import AttackPlanner
         self.attack_planner = AttackPlanner() if policy == 'attacker' else None
 
@@ -139,7 +186,7 @@ class RLController(Controller):
             self.update_peer(kind, x, y, yaw, now, frame, stamp)
             return
         if kind == 'ball' and self.duel:
-            previous = self.ball
+            previous = self._observed.get('ball')
             # Referee placement can jump across a goal line. Do not count a
             # discontinuous or stale trajectory as a goal or retain touch state.
             if previous is not None:
@@ -158,16 +205,29 @@ class RLController(Controller):
             raise ValueError('单狗模式不接收对手位姿')
         if not all(math.isfinite(v) for v in (x, y, yaw, now, stamp)) or stamp < 0:
             setattr(self, kind, None)
+            self._observed[kind] = None
             self.tracks[kind].invalidate('invalid_pose')
             return
-        previous = getattr(self, kind)
+        previous = self._observed.get(kind)
         sequence = previous.sequence + 1 if previous is not None else 1
-        setattr(self, kind, Pose(x, y, yaw, now, frame, stamp, sequence))
+        pose = Pose(x, y, yaw, now, frame, stamp, sequence)
+        if previous is not None and previous.frame == frame and now > previous.received:
+            dt = now - previous.received
+            old = self._velocity.get(kind, (0.0, 0.0, 0.0))
+            velocity = ((x-previous.x)/dt, (y-previous.y)/dt,
+                        wrap_angle(yaw-previous.yaw)/dt)
+            self._acceleration[kind] = tuple((velocity[j]-old[j])/dt
+                                             for j in range(3))
+            self._velocity[kind] = velocity
+        self._observed[kind] = pose
+        self._predicted.discard(kind)
+        setattr(self, kind, pose)
         self.tracks[kind].update(now, stamp, x, y, yaw, frame)
         if kind == 'opponent':
             self.opponent = getattr(self, kind)
 
     def poses_valid(self, now):
+        self._predict_missing(now)
         if not super().poses_valid(now):
             return False
         if not self.duel:
@@ -175,7 +235,7 @@ class RLController(Controller):
         peer_names = ('teammate', 'opponent', 'opponent2') if self.team2v2 else ('opponent',)
         return all((getattr(self, name) is not None and
                     getattr(self, name).frame == self.dog.frame and
-                    0 <= now-getattr(self, name).received <= self.cfg.pose_timeout)
+                    0 <= now-getattr(self, name).received <= min(0.20, self.cfg.pose_timeout) + self.cfg.prediction_timeout)
                    for name in peer_names)
 
     def observation(self, now):
@@ -186,7 +246,11 @@ class RLController(Controller):
         def body(x, y):
             return (co*x + si*y, -si*x + co*y)
 
-        rel = body(b.x-d.x, b.y-d.y)
+        # 训练/实机统一以胸部接触点而不是刚体质心作为球的相对位置。
+        ox = float(getattr(c, 'ball_contact_offset_x', 0.10))
+        oy = float(getattr(c, 'ball_contact_offset_y', 0.0))
+        contact_world = (d.x + co*ox - si*oy, d.y + si*ox + co*oy)
+        rel = body(b.x-contact_world[0], b.y-contact_world[1])
         # attack_goal always denotes the opponent goal, including for defense.
         goal = body(c.goal_x-d.x, c.goal_y-d.y)
         dog_v = self.tracks['dog'].velocity
@@ -249,6 +313,7 @@ class RLController(Controller):
 
     def command(self, now):
         try:
+            self._maybe_switch_team_role(now)
             velocity = super().command(now)
         except (ValueError, FloatingPointError, OverflowError) as exc:
             self.stop('RL 推理失败：' + str(exc))
@@ -365,12 +430,9 @@ class RLController(Controller):
                 self.attack_planner.reset()
             return self.ZERO
         if self.state == 'WAIT_POSE':
-            pair = (d.sequence, b.sequence)
-            if pair[0] != self.confirm_pair[0] and pair[1] != self.confirm_pair[1]:
-                self.confirmed += 1
-                self.confirm_pair = pair
-            if self.confirmed < 3:
-                return self.ZERO
+            # 动捕首帧通过坐标系和有限值检查后立即允许策略接管；
+            # 连续稳定三帧只会增加起步延迟，无法提高控制质量。
+            self.confirmed = 3
         if self.started_at is None:
             self.started_at = now
         action = self.actor(self.observation(now))
@@ -378,7 +440,8 @@ class RLController(Controller):
         self.distance = math.hypot(b.x-d.x, b.y-d.y)
         self.contact_seen |= self.distance < .43
         velocity = action*self.effective_scale
-        mode, reason = 'RL', 'PPO ' + self.policy + ' 策略控制'
+        mode, reason = 'RL', 'PPO {} ({}) 策略控制'.format(
+            self.policy, self.team_role if self.team2v2 else self.policy)
         if self.attack_planner:
             override = self.attack_planner.command(self, now)
             if override is not None:
@@ -411,3 +474,41 @@ class RLController(Controller):
             self.state, self.reason = mode, reason
         self.target_yaw = None  # PPO outputs angular velocity, not a target heading.
         return tuple(float(v) for v in velocity)
+
+    def _maybe_switch_team_role(self, now):
+        """Keep one attacker and one assist dog, switching only on a clear failure.
+
+        Both dogs see the same teammate pose, so the threshold is symmetric.  A
+        cooldown prevents them from swapping every control tick when they are
+        briefly side by side.
+        """
+        if not (self.team2v2 and self.auto_role_switch and self.teammate and
+                self.dog and self.ball):
+            return
+        if now - self.role_switch_at < self.role_cooldown:
+            return
+        goal_x, goal_y = self.cfg.goal_x, self.cfg.goal_y
+        dx, dy = goal_x - self.ball.x, goal_y - self.ball.y
+        norm = math.hypot(dx, dy)
+        if norm < 1e-6:
+            return
+        # Desired attacking station is behind the ball relative to the goal.
+        stage_x = self.ball.x - dx / norm * 0.70
+        stage_y = self.ball.y - dy / norm * 0.70
+        own = math.hypot(self.dog.x - stage_x, self.dog.y - stage_y)
+        mate = math.hypot(self.teammate.x - stage_x, self.teammate.y - stage_y)
+        poor = own > 1.25 and own > mate + 0.45
+        mate_poor = mate > 1.25 and mate > own + 0.45
+        # Require a minimum role dwell time after launch and after every switch.
+        if self.started_at is not None and now - self.started_at < self.role_min_time:
+            return
+        if self.team_role == 'attack' and poor:
+            self.team_role = 'assist'
+            self.actor = self.assist_actor
+            self.role_switch_at = now
+            self.reason = 'attack 站位明显落后，切换为 assist'
+        elif self.team_role == 'assist' and mate_poor:
+            self.team_role = 'attack'
+            self.actor = self.attack_actor
+            self.role_switch_at = now
+            self.reason = '原 attack 站位明显失效，assist 接管 attack'

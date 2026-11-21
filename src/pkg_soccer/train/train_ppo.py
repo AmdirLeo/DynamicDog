@@ -6,10 +6,10 @@
     # 1) 先训进攻狗（队友/对手是脚本角色）
     python -m train.train_ppo --role attacker --steps 5000000 --envs 8 --out runs/a41
 
-    # 2) 再训防守狗，队友/对手换成上一版权重（自博弈）
-    python -m train.train_ppo --role defender --steps 5000000 --envs 8 \
-        --peer-opponents pkg_soccer/policy_duel_attacker_actor.npz \
-        --out runs/d41
+    # 2) 训练支援狗；它的目标位由 assist shaping 固定在球侧后方
+    python -m train.train_ppo --role assist --steps 5000000 --envs 8 \
+        --peer-opponents pkg_soccer/policy_2v2_attack_actor.npz \
+        --out runs/assist41
 
     # 3) 从 29 维 1v1 权重热启动（新增的两个槽位权重先置 0，行为与旧策略一致）
     python -m train.train_ppo --role attacker --init pkg_soccer/policy_duel_attacker_actor.npz \
@@ -28,10 +28,10 @@ import os
 import numpy as np
 
 from . import scripted
-from .team_env import TEAM_OF, EnvConfig, TeamEnv
+from .team_env import CONTACT_DISTANCE, TEAM_OF, EnvConfig, TeamEnv
 
 # 角色 → 受控狗编号（0/1 属于 0 队）
-AGENT_OF = {'attacker': 0, 'defender': 1}
+AGENT_OF = {'attacker': 0, 'assist': 1, 'defender': 1}
 # 常速档动作缩放；`--speed-scale k` 只放大前进/侧移，转向保持 0.70 rad/s
 BASE_SCALE = (0.45, 0.20, 0.70)
 
@@ -68,7 +68,7 @@ def role_map(agent, controlled_role):
         if index == agent:
             roles[index] = controlled_role
         elif int(TEAM_OF[index]) == team:
-            roles[index] = 'support' if controlled_role == 'attacker' else 'attacker'
+            roles[index] = 'assist' if controlled_role == 'attacker' else 'attacker'
         else:
             roles[index] = scripted.default_role(index)
     return roles
@@ -94,12 +94,32 @@ def build_env_class():
             self.agent = int(agent)
             self.roles = role_map(self.agent, role)
             self.peers = peers or {}
+            self.role = role
             self.team = int(TEAM_OF[self.agent])
             obs_dim = self.env.cfg.obs_dim
             self.observation_space = gym.spaces.Box(
                 -5.0, 5.0, shape=(obs_dim,), dtype=np.float32)
             self.action_space = gym.spaces.Box(
                 -1.0, 1.0, shape=(3,), dtype=np.float32)
+            self._role_potential = None
+
+        def _role_potential_value(self):
+            """Role shaping keeps assist in a support lane instead of duplicating attack."""
+            if self.role not in ('assist', 'attacker'):
+                return 0.0
+            goal = self.env.attack_goal_of(self.agent)
+            own = self.env.own_goal_of(self.agent)
+            ball = self.env.ball
+            axis = np.asarray(goal, dtype=np.float32) - np.asarray(own, dtype=np.float32)
+            norm = float(np.linalg.norm(axis))
+            unit = axis / norm if norm > 1e-6 else np.array([1., 0.], dtype=np.float32)
+            if self.role == 'attacker':
+                target = ball - unit * scripted.STAGE_DISTANCE
+            else:
+                perpendicular = np.array([-unit[1], unit[0]])
+                side = -1.0 if ball[1] > 0 else 1.0
+                target = ball - unit * scripted.SUPPORT_GAP + perpendicular * scripted.SUPPORT_LATERAL * side
+            return -float(np.linalg.norm(self.env.pos[self.agent] - target))
 
         def _other_action(self, index, observation):
             same_team = int(TEAM_OF[index]) == self.team
@@ -111,6 +131,7 @@ def build_env_class():
 
         def reset(self, *, seed=None, options=None):
             obs = self.env.reset()
+            self._role_potential = self._role_potential_value()
             return obs[self.agent], {}
 
         def step(self, action):
@@ -120,7 +141,12 @@ def build_env_class():
                                 for i in range(4)])
             actions[self.agent] = np.clip(np.asarray(action, np.float32), -1, 1)
             obs, reward, done, info = self.env.step(actions)
-            return (obs[self.agent], float(reward[self.agent]),
+            role_potential = self._role_potential_value()
+            role_reward = 0.45 * (role_potential - self._role_potential)
+            if self.role == 'assist' and np.linalg.norm(self.env.pos[self.agent] - self.env.ball) < CONTACT_DISTANCE:
+                role_reward -= 0.015
+            self._role_potential = role_potential
+            return (obs[self.agent], float(reward[self.agent] + role_reward),
                     bool(done), False, info)
 
     return SingleAgentEnv
@@ -167,9 +193,13 @@ def load_initial_weights(model, npz_path, obs_dim, action_scale=None):
 
     reference = np.load(npz_path, allow_pickle=False)
     wanted = {}
-    for index, prefix in ((0, 'mlp_extractor.policy_net.0'),
-                          (2, 'mlp_extractor.policy_net.2'),
-                          (4, 'action_net')):
+    indices = sorted(int(key[6:-7]) for key in reference.files
+                     if key.startswith('actor_') and key.endswith('_weight'))
+    if not indices or indices[0] != 0:
+        raise SystemExit('参考权重没有有效 actor 层')
+    for index in indices:
+        prefix = ('action_net' if index == indices[-1]
+                  else 'mlp_extractor.policy_net.{}'.format(index))
         weight = reference[f'actor_{index}_weight']
         bias = reference[f'actor_{index}_bias']
         if index == 0 and weight.shape[1] != obs_dim:
@@ -179,7 +209,7 @@ def load_initial_weights(model, npz_path, obs_dim, action_scale=None):
             padded = np.zeros((weight.shape[0], obs_dim), dtype=np.float32)
             padded[:, :weight.shape[1]] = weight
             weight = padded
-        if index == 4 and action_scale is not None:
+        if index == indices[-1] and action_scale is not None:
             old = np.asarray(reference['action_scale'], np.float32) \
                 if 'action_scale' in reference else np.array([0.45, 0.20, 0.70],
                                                              np.float32)
@@ -195,10 +225,21 @@ def load_initial_weights(model, npz_path, obs_dim, action_scale=None):
     state = model.policy.state_dict()
     with torch.no_grad():
         for name, tensor in wanted.items():
-            if name not in state or state[name].shape != tensor.shape:
+            if name not in state:
                 raise SystemExit(f'{name} 形状不匹配：'
                                  f'{state.get(name).shape if name in state else None} '
                                  f'vs {tuple(tensor.shape)}')
+            target = state[name]
+            if target.shape != tensor.shape:
+                # 扩大网络时保留旧矩阵的左上角，其余神经元用零初始化。
+                expanded = torch.zeros_like(target)
+                rows = min(target.shape[0], tensor.shape[0])
+                cols = min(target.shape[1], tensor.shape[1]) if tensor.ndim == 2 else None
+                if tensor.ndim == 2:
+                    expanded[:rows, :cols].copy_(tensor[:rows, :cols])
+                else:
+                    expanded[:rows].copy_(tensor[:rows])
+                tensor = expanded
             state[name].copy_(tensor)
     print(f'已用 {npz_path} 热启动（第一层输入 {obs_dim} 维，新增列置 0）')
 
@@ -208,7 +249,7 @@ def main(argv=None):
     parser.add_argument('--steps', type=int, default=5_000_000)
     parser.add_argument('--envs', type=int, default=8)
     parser.add_argument('--role', default='attacker',
-                        choices=('attacker', 'defender'))
+                        choices=('attacker', 'assist', 'defender'))
     parser.add_argument('--obs-dim', type=int, default=41, choices=(29, 41),
                         help='41=2v2（队友+双对手），29=旧 1v1')
     parser.add_argument('--seed', type=int, default=0)
@@ -217,7 +258,7 @@ def main(argv=None):
                              '（前进/侧移按比例放大，转向不变）。2.0 = 高速档'
                              '（0.90 m/s），3.0 = 接近协议上限 1.35 m/s')
     parser.add_argument('--speed-limit', type=float, default=None,
-                        help='平移限速（m/s）。默认 = 0.50 × speed-scale')
+                        help='平移限速（m/s）。默认 = 0.45 × speed-scale')
     parser.add_argument('--dash', action='store_true',
                         help='开启高速短冲推球（450 ms × 1.5 m/s，冷却 1.2 s），'
                              '与部署端 rl_dash 同规则')
@@ -294,13 +335,23 @@ def main(argv=None):
     parser.add_argument('--no-tb', action='store_true',
                         help='不写 tensorboard 曲线')
     parser.add_argument('--checkpoint-every', type=int, default=200_000)
+    parser.add_argument('--net-width', type=int, default=256,
+                        help='每个隐藏层宽度（默认 256）')
+    parser.add_argument('--net-depth', type=int, default=6,
+                        help='隐藏层数量（默认 6）')
+    parser.add_argument('--contact-offset-x', type=float, default=0.10,
+                        help='狗刚体中心到胸部接触点的前向偏移（米）')
+    parser.add_argument('--contact-offset-y', type=float, default=0.0,
+                        help='狗刚体中心到胸部接触点的侧向偏移（米）')
     args = parser.parse_args(argv)
     if not 1.0 <= args.speed_scale <= 3.3:
         raise SystemExit('--speed-scale 必须在 [1.0, 3.3]（前进 ≤ 1.5 m/s）')
+    if not 32 <= args.net_width <= 1024 or not 2 <= args.net_depth <= 12:
+        raise SystemExit('--net-width 应在 32..1024，--net-depth 应在 2..12')
     action_scale = (BASE_SCALE[0] * args.speed_scale,
                     BASE_SCALE[1] * args.speed_scale,
                     BASE_SCALE[2])
-    speed_limit = (0.50 * args.speed_scale if args.speed_limit is None
+    speed_limit = (0.45 * args.speed_scale if args.speed_limit is None
                    else args.speed_limit)
 
     gym, torch, nn, PPO, CheckpointCallback, _, _, DummyVecEnv = _deps()
@@ -351,6 +402,7 @@ def main(argv=None):
                         reward_front=args.reward_front,
                         reward_back=args.reward_back,
                         scripted_speed=args.scripted_speed,
+                        contact_offset=(args.contact_offset_x, args.contact_offset_y),
                         ablate=parse_ablate(args.ablate))
         return SingleAgentEnv(agent=agent, role=args.role, cfg=cfg,
                               seed=args.seed, peers=peers)
@@ -361,7 +413,8 @@ def main(argv=None):
         n_steps=512, batch_size=2048, learning_rate=args.lr,
         gamma=0.995, gae_lambda=0.95, clip_range=0.2,
         ent_coef=args.ent_coef, vf_coef=0.5, max_grad_norm=0.5,
-        policy_kwargs=dict(net_arch=[128, 128], activation_fn=nn.Tanh,
+        policy_kwargs=dict(net_arch=[args.net_width] * args.net_depth,
+                           activation_fn=nn.Tanh,
                            log_std_init=-0.5),
         tensorboard_log=None if args.no_tb else tensorboard_dir(args.out),
         verbose=1, seed=args.seed)
@@ -401,7 +454,10 @@ def main(argv=None):
                 body_dropout=float(args.body_dropout),
                 randomize=not bool(args.no_randomize),
                 peer_teammate=teammate_path, peer_opponents=opponent_path,
-                init=args.init)
+                init=args.init, net_width=int(args.net_width),
+                net_depth=int(args.net_depth),
+                contact_offset=[float(args.contact_offset_x),
+                                float(args.contact_offset_y)])
     with open(os.path.join(args.out, 'train_config.json'), 'w',
               encoding='utf-8') as handle:
         json.dump(meta, handle, ensure_ascii=False, indent=2)
