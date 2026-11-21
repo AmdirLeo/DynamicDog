@@ -331,6 +331,8 @@ def main(argv=None):
     parser.add_argument('--peer-opponents', default='', help='只给对手指定 npz')
     parser.add_argument('--init', default='',
                         help='从部署端 npz 热启动（29 维可自动补零到 41 维）')
+    parser.add_argument('--resume', default='',
+                        help='从 SB3 .zip 检查点继续训练；网络结构必须一致')
     parser.add_argument('--out', default='runs/attacker41')
     parser.add_argument('--no-tb', action='store_true',
                         help='不写 tensorboard 曲线')
@@ -408,17 +410,23 @@ def main(argv=None):
                               seed=args.seed, peers=peers)
 
     venv = DummyVecEnv([make_env for _ in range(max(1, args.envs))])
-    model = PPO(
-        policy_class, venv,
-        n_steps=512, batch_size=2048, learning_rate=args.lr,
-        gamma=0.995, gae_lambda=0.95, clip_range=0.2,
-        ent_coef=args.ent_coef, vf_coef=0.5, max_grad_norm=0.5,
-        policy_kwargs=dict(net_arch=[args.net_width] * args.net_depth,
-                           activation_fn=nn.Tanh,
-                           log_std_init=-0.5),
-        tensorboard_log=None if args.no_tb else tensorboard_dir(args.out),
-        verbose=1, seed=args.seed)
-    if args.init:
+    if args.resume:
+        if args.init:
+            raise SystemExit('--resume 与 --init 不能同时使用')
+        print(f'从 SB3 检查点恢复：{args.resume}')
+        model = PPO.load(args.resume, env=venv, device='auto')
+    else:
+        model = PPO(
+            policy_class, venv,
+            n_steps=512, batch_size=2048, learning_rate=args.lr,
+            gamma=0.995, gae_lambda=0.95, clip_range=0.2,
+            ent_coef=args.ent_coef, vf_coef=0.5, max_grad_norm=0.5,
+            policy_kwargs=dict(net_arch=[args.net_width] * args.net_depth,
+                               activation_fn=nn.Tanh,
+                               log_std_init=-0.5),
+            tensorboard_log=None if args.no_tb else tensorboard_dir(args.out),
+            verbose=1, seed=args.seed)
+    if args.init and not args.resume:
         load_initial_weights(model, args.init, args.obs_dim, action_scale)
     checkpoint = CheckpointCallback(
         save_freq=max(1, args.checkpoint_every // max(1, args.envs)),
