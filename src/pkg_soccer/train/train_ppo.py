@@ -119,6 +119,8 @@ def build_env_class():
                 perpendicular = np.array([-unit[1], unit[0]])
                 side = -1.0 if ball[1] > 0 else 1.0
                 target = ball - unit * scripted.SUPPORT_GAP + perpendicular * scripted.SUPPORT_LATERAL * side
+            limit = np.asarray(self.env.field_limit())
+            target = np.clip(target, -limit, limit)
             return -float(np.linalg.norm(self.env.pos[self.agent] - target))
 
         def _other_action(self, index, observation):
@@ -130,6 +132,10 @@ def build_env_class():
                                 speed=self.env.cfg.scripted_speed)
 
         def reset(self, *, seed=None, options=None):
+            super().reset(seed=seed)
+            if seed is not None:
+                self.env.rng = np.random.default_rng(seed)
+                self.env.pending = None
             obs = self.env.reset()
             self._role_potential = self._role_potential_value()
             return obs[self.agent], {}
@@ -137,17 +143,19 @@ def build_env_class():
         def step(self, action):
             # 决策时刻一致：先用当前状态快照驱动其他三只狗，再统一结算一步
             snapshot = self.env.observations()
-            actions = np.stack([self._other_action(i, snapshot[i])
-                                for i in range(4)])
+            actions = np.stack([np.zeros(3, np.float32) if i == self.agent else
+                                self._other_action(i, snapshot[i]) for i in range(4)])
             actions[self.agent] = np.clip(np.asarray(action, np.float32), -1, 1)
             obs, reward, done, info = self.env.step(actions)
             role_potential = self._role_potential_value()
-            role_reward = 0.45 * (role_potential - self._role_potential)
+            terminated = bool(info['events'])
+            role_reward = 0.45 * (self.env.cfg.gamma_shaping *
+                                  (0.0 if terminated else role_potential) - self._role_potential)
             if self.role == 'assist' and np.linalg.norm(self.env.pos[self.agent] - self.env.ball) < CONTACT_DISTANCE:
                 role_reward -= 0.015
             self._role_potential = role_potential
             return (obs[self.agent], float(reward[self.agent] + role_reward),
-                    bool(done), False, info)
+                    terminated, bool(done and not terminated), info)
 
     return SingleAgentEnv
 

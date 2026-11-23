@@ -56,6 +56,7 @@ def run_half(env, actors, roles, steps=HALF_STEPS, speed=scripted.SPEED):
 def main(argv=None):
     parser = argparse.ArgumentParser(description='2v2 半场评估')
     parser.add_argument('--model', default='', help='部署端 npz；留空则全部脚本')
+    parser.add_argument('--assist-model', default='', help='本队第二只狗的独立 assist 权重')
     parser.add_argument('--agent', type=int, default=None,
                         help='只控这只狗；不给则控本队两只')
     parser.add_argument('--team', type=int, default=0, choices=(0, 1),
@@ -78,6 +79,10 @@ def main(argv=None):
                         help='平移限速（m/s）。默认 max(0.50, scale[0])；'
                              '0.90 档权重训练时常用 1.0，不给会裁掉对角指令')
     args = parser.parse_args(argv)
+    if args.halves < 1:
+        parser.error('--halves 必须为正整数')
+    if args.assist_model and (not args.model or args.agent is not None):
+        parser.error('--assist-model 需要 --model，且不能指定 --agent')
 
     ablate = tuple(part.strip() for part in args.ablate.split(',') if part.strip())
     actors = {}
@@ -107,18 +112,33 @@ def main(argv=None):
             raise SystemExit(f'权重是 {actor.obs_dim} 维，与 --obs-dim '
                              f'{args.obs_dim} 不一致')
         actors = {i: actor for i in controlled_indices(args)}
+        if args.assist_model:
+            assist = load_actor(args.assist_model)
+            if (assist.obs_dim != args.obs_dim or assist.role != 'assist' or
+                    not np.allclose(assist.scale, actor.scale)):
+                raise SystemExit('assist 权重维度、角色或速度档不匹配')
+            actors[controlled_indices(args)[1]] = assist
         # 受控队：一只按角色进攻、一只按角色支援；未被控的狗按默认角色
         for index in actors:
             roles[index] = 'attacker' if index % 2 == 0 else 'support'
     events = {}
+    scores = []
     for half in range(args.halves):
+        # 独立种子和全新开场，不能让上半场的死球状态污染下一次评估。
+        env = TeamEnv(env.cfg, seed=args.seed + half)
         half_events = run_half(env, actors, roles,
                                speed=args.scripted_speed)
+        scores.append(tuple(int(v) for v in env.score))
         for kind, count in half_events.items():
             events[kind] = events.get(kind, 0) + count
         print(f'半场 {half + 1}: 比分 0队={int(env.score[0])} '
               f'1队={int(env.score[1])} 事件={half_events}')
-    print(f'合计：0队={int(env.score[0])} 1队={int(env.score[1])} '
+    totals = np.sum(scores, axis=0)
+    scored = sum(s[args.team] > 0 for s in scores)
+    won = sum(s[args.team] > s[1-args.team] for s in scores)
+    print(f'至少进一球的半场={scored}/{args.halves}；获胜半场={won}/{args.halves}；'
+          '这不是单次射门命中率；固定 attack/assist，不含实机角色切换。')
+    print(f'合计：0队={int(totals[0])} 1队={int(totals[1])} '
           f'事件={events} 受控狗={sorted(actors) or "无"} 模式='
           f'{"策略" if actors else "全脚本"} 观测={args.obs_dim} 维 '
           f'速度档={scale[0]:.2f}m/s 短冲={"开" if args.dash else "关"}')

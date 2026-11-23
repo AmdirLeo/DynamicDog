@@ -42,6 +42,10 @@ class Actor:
             self.role = str(weights['role'].item()) if 'role' in weights else 'stage2'
             self.layout = (str(weights['obs_layout'].item()) if 'obs_layout' in weights
                            else {23: 'single', 29: '1v1', 41: '2v2'}.get(self.obs_dim, 'unknown'))
+            # The legacy shared trainer stored teammate first. TeamEnv stores
+            # nearest opponent first; same dimension does not mean same layout.
+            self.peer_order = ('teammate_first' if self.role in
+                               ('shared_2v2', 'shared_2v2_large') else 'opponent_first')
             self.contact_offset = (tuple(np.asarray(weights['contact_offset'], np.float32).reshape(2))
                                   if 'contact_offset' in weights else None)
             if self.obs_dim in (29, 41):
@@ -110,18 +114,22 @@ class RLController(Controller):
             default_shared = Path(__file__).with_name(
                 'policy_2v2_shared_large_actor.npz' if policy == 'shared_2v2_large'
                 else 'policy_2v2_shared_actor.npz')
-            attack_path = (Path(attack_model_path) if attack_model_path else
-                           Path(model_path) if model_path else
-                           Path(__file__).with_name('policy_2v2_attack_actor.npz'))
-            assist_path = (Path(assist_model_path) if assist_model_path else
-                           Path(model_path) if model_path else
-                           Path(__file__).with_name('policy_2v2_assist_actor.npz'))
-            if not attack_path.exists():
-                attack_path = default_shared
-            if not assist_path.exists():
-                assist_path = default_shared
+            if bool(attack_model_path) != bool(assist_model_path):
+                raise ValueError('独立双策略必须同时指定 rl_attack_model_path 和 rl_assist_model_path')
+            # Experimental weights must be explicitly selected. Merely copying
+            # an unvalidated export into the package cannot change the default.
+            attack_path = Path(attack_model_path or model_path or default_shared)
+            assist_path = Path(assist_model_path or model_path or default_shared)
             self.attack_actor = Actor(attack_path)
             self.assist_actor = Actor(assist_path)
+            if (self.attack_actor.obs_dim != 41 or self.assist_actor.obs_dim != 41 or
+                    not np.allclose(self.attack_actor.scale, self.assist_actor.scale) or
+                    self.attack_actor.contact_offset != self.assist_actor.contact_offset or
+                    self.attack_actor.peer_order != self.assist_actor.peer_order):
+                raise ValueError('双策略的观测、速度档或接触偏移不一致')
+            if attack_model_path and (self.attack_actor.role not in ('attack', 'attacker') or
+                                      self.assist_actor.role != 'assist'):
+                raise ValueError('attack/assist 模型角色不匹配')
             self.actor = self.attack_actor if self.team_role == 'attack' else self.assist_actor
             model_path = str(default_shared)
         elif not model_path and self.duel:
@@ -289,6 +297,11 @@ class RLController(Controller):
                         math.sin(oyaw), math.cos(oyaw)))
         elif self.actor.obs_dim == 41:
             peer_names = ('teammate', 'opponent', 'opponent2')
+            if self.actor.peer_order == 'opponent_first':
+                enemies = sorted(('opponent', 'opponent2'), key=lambda name:
+                                 math.hypot(getattr(self, name).x-d.x,
+                                            getattr(self, name).y-d.y))
+                peer_names = (enemies[0], 'teammate', enemies[1])
             peer_features = []
             # TeamEnv2v2 uses the outer field half-length (5 m) for its
             # longitudinal boundary features. Keep this branch identical to
@@ -296,8 +309,9 @@ class RLController(Controller):
             outer_half = max(abs(c.field_min_x), abs(c.field_max_x))
             obs[14:18] = ((px + outer_half)/9., (outer_half-px)/9.,
                           (py-c.field_min_y)/6., (c.field_max_y-py)/6.)
+            age_names = peer_names if self.actor.peer_order == 'teammate_first' else (peer_names[0],)
             age = max(*ages, *(max(0., now-getattr(self, name).received)
-                               for name in peer_names))
+                               for name in age_names))
             obs[20:23] = (age/.5, age/.5, float(age <= .5))
             for name in peer_names:
                 peer = getattr(self, name)

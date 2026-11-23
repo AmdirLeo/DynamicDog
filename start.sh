@@ -19,7 +19,7 @@ CONTACT_OFFSET_Y="${CONTACT_OFFSET_Y:-}"
 # 当前实机保守速度（m/s）：先用 0.45，避免高速动捕偏移。
 RL_SPEED_LIMIT="${RL_SPEED_LIMIT:-0.45}"
 # 0 = 按 RL_SPEED_LIMIT 自动标定；设 1.0 可复现权重原始动作档。
-RL_SPEED_GAIN="${RL_SPEED_GAIN:-0}"
+RL_SPEED_GAIN="${RL_SPEED_GAIN:-0.0}"
 # 球进死区时仍继续低速走位；设为 false 可恢复等待裁判时停住。
 RL_CONTINUE_DEADZONE="${RL_CONTINUE_DEADZONE:-true}"
 RL_DEADZONE_SPEED_LIMIT="${RL_DEADZONE_SPEED_LIMIT:-0.35}"
@@ -151,11 +151,11 @@ if [[ -n "$RL_MODEL_PATH" && ! -f "$RL_MODEL_PATH" ]]; then
   echo "警告：RL_MODEL_PATH=$RL_MODEL_PATH 不存在，改用包内默认权重。" >&2
 else
   add_opt rl_model_path "$RL_MODEL_PATH"
+fi
 add_opt rl_attack_model_path "$RL_ATTACK_MODEL_PATH"
 add_opt rl_assist_model_path "$RL_ASSIST_MODEL_PATH"
 add_opt ball_contact_offset_x "$CONTACT_OFFSET_X"
 add_opt ball_contact_offset_y "$CONTACT_OFFSET_Y"
-fi
 add_opt dog_name "$DOG_NAME"
 add_opt teammate_pose_topic "$TEAMMATE_TOPIC"
 add_opt opponent_pose_topic "$OPPONENT_TOPIC"

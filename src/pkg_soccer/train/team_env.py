@@ -262,7 +262,7 @@ class TeamEnv:
         self.dash_dir = np.zeros((4, 2))
         self.dash_count = 0
         self._fields = {0: FieldSpec(goal_x=ATTACK_GOAL[0][0]),
-                        1: FieldSpec(goal_x=ATTACK_GOAL[1][0])}
+                        1: FieldSpec(goal_x=ATTACK_GOAL[1][0], yaw=math.pi)}
         self.reset()
 
     # ------------------------------------------------------------------ reset
@@ -277,6 +277,8 @@ class TeamEnv:
         self.last_touch = None
         self.stuck_time = 0.0
         self.colliding = False
+        self._phys_prev[:] = False
+        self._phys_now[:] = False
         self.visible = [[True, True] for _ in range(4)]
         self.dash_until[:] = 0.0
         self.dash_ready_at[:] = 0.0
@@ -310,6 +312,8 @@ class TeamEnv:
                 home = HOME[int(TEAM_OF[i])][i % 2]
                 self.pos[i] = self._clip_dog(home + self.rng.normal(0, 0.05, 2))
                 self.yaw[i] = float(self.rng.uniform(-math.pi, math.pi))
+        elif kind == 'timeout':
+            self._kickoff()
         else:
             self.ball = self._random_boundary_restart()
             for i in range(4):
@@ -322,23 +326,27 @@ class TeamEnv:
         """裁判将死区/出界球随机放在原出界点附近的场内位置。
 
         现场发球点是靠近边界的临时位置，不保证落在训练场地的九宫格标记上。
-        保留原球最接近的边界方向，并在 0.08--0.75 m 的内缩距离和切向位置上
-        随机化，避免策略只记住固定发球点。
+        保留原球最接近的边界方向，并在死区内侧随机化，避免策略只记住固定发球点。
+        重发后的球不能仍落在死区，否则下一步会被立即再次判死球。
         """
         x, y = float(self.ball[0]), float(self.ball[1])
         side_gap = min(abs(y - MIN_Y), abs(MAX_Y - y))
         end_gap = min(abs(x - MIN_X), abs(MAX_X - x))
-        inward = float(self.rng.uniform(0.08, 0.75))
+        # DEAD_STRIP 是事件判定的危险条带宽度；再向内留少量余量，确保
+        # 重发球是有效比赛状态而不是“重发后立刻再次死球”。
+        inward = float(self.rng.uniform(DEAD_STRIP + 0.08,
+                                        DEAD_STRIP + 0.85))
         if side_gap <= end_gap:
             side = 1.0 if y >= 0.0 else -1.0
-            rx = float(self.rng.uniform(MIN_X + 0.45, MAX_X - 0.45))
+            rx = float(np.clip(x + self.rng.uniform(-0.75, 0.75),
+                               MIN_X + DEAD_STRIP + 0.08,
+                               MAX_X - DEAD_STRIP - 0.08))
             ry = (MAX_Y - inward) if side > 0 else (MIN_Y + inward)
             return np.array([rx, ry], dtype=float)
         side = 1.0 if x >= 0.0 else -1.0
-        ry = float(self.rng.uniform(GOAL_WIDTH / 2.0 + 0.08,
-                                    MAX_Y - 0.20))
-        if self.rng.random() < 0.5:
-            ry = -ry
+        ry = float(np.clip(y + self.rng.uniform(-0.75, 0.75),
+                           MIN_Y + DEAD_STRIP + 0.08,
+                           MAX_Y - DEAD_STRIP - 0.08))
         rx = (MAX_X - inward) if side > 0 else (MIN_X + inward)
         return np.array([rx, ry], dtype=float)
 
@@ -361,6 +369,9 @@ class TeamEnv:
         self.obs_delay = int(self.rng.integers(c.obs_delay[0], c.obs_delay[1] + 1))
 
     def _prime_tracks(self):
+        # Episode clocks restart at 1s; never regress across two episodes.
+        self.tracks = [Track(3.0) for _ in range(4)]
+        self.ball_track = Track(12.0)
         for k in range(3):
             ts = self.t - (2 - k) * DT
             for i in range(4):
@@ -612,9 +623,11 @@ class TeamEnv:
                              (goal[1] - self.ball[1]) / norm])
             stage = self.ball - unit * STAGE_DISTANCE
             dogs = np.where(TEAM_OF == team)[0]
-            stage_distance = float(np.mean(
+            # Only one dog needs to approach the ball; the other's role reward
+            # guides it to support, rather than rewarding both for crowding it.
+            stage_distance = float(np.min(
                 [math.hypot(*(self.pos[i] - stage)) for i in dogs]))
-            values.append(self.cfg.shaping_ball * ball_to_goal +
+            values.append(-self.cfg.shaping_ball * ball_to_goal -
                           self.cfg.shaping_stage * stage_distance + edge)
         return np.array(values)
 
@@ -631,7 +644,9 @@ class TeamEnv:
         team_reward = np.full(2, c.reward_step)
         phi = self._team_potentials()
         if self.prev_phi is not None:
-            team_reward += c.gamma_shaping * phi - self.prev_phi
+            # True terminal states have zero potential. Time limits are handled
+            # as truncations by the Gym wrapper and keep their bootstrap value.
+            team_reward += c.gamma_shaping * (0.0 if events else phi) - self.prev_phi
         for i in newly_contact:
             team_reward[int(TEAM_OF[i])] += c.reward_contact
         # 半场推进项：球每深入对方半场 1 m，每步多拿 reward_half*(1/5)*dt；
