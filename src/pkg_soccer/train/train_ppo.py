@@ -127,7 +127,8 @@ def build_env_class():
             same_team = int(TEAM_OF[index]) == self.team
             peer = self.peers.get('teammate' if same_team else 'opponent')
             if peer is not None:
-                return peer.act(observation)
+                action = peer.act(self.env.observation_for_actor(index, peer.actor))
+                return np.clip(action * peer.actor.scale / self.env.cfg.action_scale, -1., 1.)
             return scripted.act(self.env, index, self.roles[index],
                                 speed=self.env.cfg.scripted_speed)
 

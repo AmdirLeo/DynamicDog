@@ -43,7 +43,7 @@ def run_half(env, actors, roles, steps=HALF_STEPS, speed=scripted.SPEED):
         actions = np.stack([scripted.act(env, i, roles.get(i), speed=speed)
                             for i in range(4)])
         for index, actor in actors.items():
-            actions[index] = np.clip(np.asarray(actor(obs[index]), np.float32),
+            actions[index] = np.clip(np.asarray(actor(env.observation_for_actor(index, actor)), np.float32),
                                      -1.0, 1.0)
         _, _, done, info = env.step(actions)
         for kind, _team in info['events']:

@@ -26,7 +26,8 @@ except Exception:  # pragma: no cover - 训练机没装 ROS 包时走副本
 
 from .obs import (DEAD_STRIP, FIELD_LENGTH, FIELD_WIDTH, GOAL_LINE_X,
                   GOAL_WIDTH, MAX_X, MAX_Y, MIN_X, MIN_Y, OBS_DIM_TEAM,
-                  SERVICE_POINTS, FieldSpec, GOAL_CENTER, make_obs, wrap_angle)
+                  SERVICE_POINTS, FieldSpec, GOAL_CENTER, make_obs, wrap_angle,
+                  body_block)
 
 DT = 0.05
 ACTION_SCALE = np.array([0.45, 0.20, 0.70], np.float32)
@@ -754,6 +755,34 @@ class TeamEnv:
 
     def observations(self):
         return np.stack([self._obs_one(i) for i in range(4)])
+
+    def observation_for_actor(self, i, actor):
+        """Use the checkpoint's input contract for historical opponents/evaluation.
+
+        Shared-policy checkpoints used teammate first and unrotated lateral
+        wall distances for team B. TeamEnv checkpoints use nearest-opponent
+        first. Physics stays fixed when comparing them.
+        """
+        obs = self._obs_one(i)
+        if actor.obs_dim != self.cfg.obs_dim:
+            raise ValueError('模型与环境观测维度不匹配')
+        offset = np.asarray(actor.contact_offset or (0., 0.), np.float32)
+        rel = obs[:2] * 3 + self.cfg.contact_offset - offset
+        obs[:2], obs[18] = rel / 3, np.linalg.norm(rel) / 3
+        if actor.obs_dim == 41 and actor.peer_order == 'teammate_first':
+            x, y, yaw, velocity = self._slot(i)
+            co, si = math.cos(yaw), math.sin(yaw)
+            team = int(TEAM_OF[i])
+            enemies = [j for j in range(4) if int(TEAM_OF[j]) != team]
+            indices = [self.teammate_of(i)] + enemies
+            for k, j in enumerate(indices):
+                slot = self._slot(j)
+                if (k == 0 and not self.visible[i][0] or
+                        k == 2 and not self.visible[i][1]):
+                    slot = None
+                obs[23+6*k:29+6*k] = body_block(slot, x, y, yaw, velocity, co, si)
+            obs[16:18] = ((y-MIN_Y)/6., (MAX_Y-y)/6.)
+        return np.clip(obs, -5., 5.)
 
     def _obs_one(self, i):
         team = int(TEAM_OF[i])
