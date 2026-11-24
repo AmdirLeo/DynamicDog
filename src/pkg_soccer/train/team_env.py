@@ -252,6 +252,7 @@ class TeamEnv:
         self.obs_delay = 0
         self.prev_phi = None
         self.colliding = False
+        self.collision_teams = np.zeros(2, dtype=bool)
         # 每只狗两个"可选刚体槽位"：[队友, 次近对手] 是否可见（对角逐槽位）
         self.visible = [[True, True] for _ in range(4)]
         # 消融掩码：维度不变，只抹掉指定信息（默认全 1 = 不消融）
@@ -278,6 +279,7 @@ class TeamEnv:
         self.last_touch = None
         self.stuck_time = 0.0
         self.colliding = False
+        self.collision_teams[:] = False
         self._phys_prev[:] = False
         self._phys_now[:] = False
         self.visible = [[True, True] for _ in range(4)]
@@ -515,6 +517,7 @@ class TeamEnv:
 
     def _dog_collisions(self):
         colliding = False
+        self.collision_teams[:] = False
         for i in range(4):
             for j in range(i + 1, 4):
                 delta = self.pos[j] - self.pos[i]
@@ -522,6 +525,8 @@ class TeamEnv:
                 if not 1e-6 < distance < 2 * DOG_RADIUS:
                     continue
                 colliding = True
+                self.collision_teams[TEAM_OF[i]] = True
+                self.collision_teams[TEAM_OF[j]] = True
                 normal = delta / distance
                 overlap = 2 * DOG_RADIUS - distance
                 self.pos[i] = self._clip_dog(self.pos[i] - normal * overlap / 2)
@@ -705,7 +710,7 @@ class TeamEnv:
             elif kind == 'deadlock':
                 team_reward += self.cfg.reward_deadlock
         if self.colliding:
-            team_reward += self.cfg.reward_collision
+            team_reward[self.collision_teams] += self.cfg.reward_collision
         # 连续靠得过近时提前给惩罚，避免策略只在发生穿模碰撞的那一帧才学会避让。
         safe_gap = 2.0 * DOG_RADIUS + 0.18
         for i in range(4):

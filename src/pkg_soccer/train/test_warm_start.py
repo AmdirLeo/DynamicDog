@@ -57,6 +57,42 @@ class WarmStartContract(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, '合约'):
                 load_initial_weights(self.model(), path, 41)
 
+    def test_anchor_has_student_gradients_and_frozen_teacher(self):
+        from .anchored_ppo import AnchoredPPO
+        with tempfile.TemporaryDirectory() as tmp:
+            source = self.model()
+            source.save(str(Path(tmp) / 'source.zip'))
+            path = str(Path(tmp) / 'teacher.npz')
+            export(str(Path(tmp) / 'source.zip'), path, obs_dim=41)
+            model = AnchoredPPO(make_policy_class(), build_env_class()(),
+                                n_steps=8, batch_size=8, n_epochs=2, device='cpu',
+                                policy_kwargs=dict(net_arch=[32]*2,
+                                                   activation_fn=torch.nn.Tanh))
+            load_initial_weights(model, path, 41, [.45, .2, .7])
+            model.set_reference(path, 41, [.45, .2, .7], [.1, 0], 'attacker')
+            observation = torch.randn(16, 41)
+            self.assertEqual(model.anchor_loss(observation)[0].item(), 0.)
+            teacher_before = {k: v.clone() for k, v in model.reference_policy.state_dict().items()}
+            with torch.no_grad():
+                model.policy.action_net.bias.add_(.3)
+            loss, mae = model.anchor_loss(observation)
+            self.assertGreater(mae.item(), .1)
+            loss.backward()
+            self.assertGreater(model.policy.action_net.bias.grad.abs().sum().item(), 0.)
+            self.assertTrue(all(p.grad is None for p in model.reference_policy.parameters()))
+            model.learn(16)
+            self.assertIn('train/anchor_loss', model.logger.name_to_value)
+            for k, v in model.reference_policy.state_dict().items():
+                self.assertTrue(torch.equal(v, teacher_before[k]), k)
+            saved = str(Path(tmp) / 'anchored.zip')
+            model.save(saved)
+            # Standard PPO deployment can read the checkpoint without teacher files.
+            exported = str(Path(tmp) / 'exported.npz')
+            export(saved, exported, obs_dim=41)
+            restored = AnchoredPPO.load(saved, device='cpu')
+            with self.assertRaisesRegex(RuntimeError, 'set_reference'):
+                restored.train()
+
 
 if __name__ == '__main__':
     unittest.main()

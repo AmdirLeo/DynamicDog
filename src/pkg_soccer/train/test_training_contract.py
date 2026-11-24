@@ -15,6 +15,19 @@ from .team_env import EnvConfig, TeamEnv
 
 
 class TrainingContract(unittest.TestCase):
+    def test_collision_penalty_only_for_involved_teams(self):
+        env = TeamEnv(EnvConfig(shaping_ball=0, shaping_stage=0, reward_step=0,
+                                reward_proximity=0, reward_collision=-.22))
+        # The opponent's internal collision must not penalize the observing team.
+        for positions, expected in (
+                ([(-3, 1), (-3, -1), (2, 0), (2.3, 0)], [0, 0, -.22, -.22]),
+                ([(-2, 0), (-1.7, 0), (3, 1), (3, -1)], [-.22, -.22, 0, 0]),
+                ([(-.1, 0), (-3, -1), (.1, 0), (3, 1)], [-.22]*4),
+                ([(-3, 1), (-3, -1), (3, 1), (3, -1)], [0]*4)):
+            env.pos[:] = positions
+            env.colliding = env._dog_collisions()
+            np.testing.assert_allclose(env._reward([], []), expected, atol=1e-6)
+
     def test_restarts_are_local_and_playable(self):
         env = TeamEnv(seed=219)
         for origin in ((0, 2.8), (0, -2.8), (5.1, 1.1), (-5.1, -1.1),

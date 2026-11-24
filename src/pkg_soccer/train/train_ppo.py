@@ -323,6 +323,9 @@ def main(argv=None):
                         help='从同结构、同角色/观测合约/速度的 npz 精确热启动')
     parser.add_argument('--resume', default='',
                         help='从 SB3 .zip 检查点继续训练；网络结构必须一致')
+    parser.add_argument('--anchor', default='',
+                        help='固定的同结构 NPZ 教师；每个 PPO minibatch 加入模仿损失')
+    parser.add_argument('--anchor-coef', type=float, default=2.0)
     parser.add_argument('--out', default='runs/attacker41')
     parser.add_argument('--no-tb', action='store_true',
                         help='不写 tensorboard 曲线')
@@ -351,6 +354,9 @@ def main(argv=None):
                    else args.speed_limit)
 
     gym, torch, nn, PPO, CheckpointCallback, _, _, DummyVecEnv = _deps()
+    if args.anchor:
+        from .anchored_ppo import AnchoredPPO
+        PPO = AnchoredPPO
     SingleAgentEnv = build_env_class()
     policy_class = make_policy_class()
     os.makedirs(args.out, exist_ok=True)
@@ -424,6 +430,10 @@ def main(argv=None):
     if args.init and not args.resume:
         load_initial_weights(model, args.init, args.obs_dim, action_scale,
                              (args.contact_offset_x, args.contact_offset_y), args.role)
+    if args.anchor:
+        model.set_reference(args.anchor, args.obs_dim, action_scale,
+                            (args.contact_offset_x, args.contact_offset_y),
+                            args.role, args.anchor_coef)
     checkpoint = CheckpointCallback(
         save_freq=max(1, args.checkpoint_every // max(1, args.envs)),
         save_path=os.path.join(args.out, 'ckpt'),
@@ -460,6 +470,7 @@ def main(argv=None):
                 randomize=not bool(args.no_randomize),
                 peer_teammate=teammate_path, peer_opponents=opponent_path,
                 init=args.init, net_width=int(args.net_width),
+                anchor=args.anchor, anchor_coef=float(args.anchor_coef),
                 net_depth=int(args.net_depth),
                 contact_offset=[float(args.contact_offset_x),
                                 float(args.contact_offset_y)])
