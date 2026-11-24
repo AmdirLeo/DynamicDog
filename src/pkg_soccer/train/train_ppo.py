@@ -8,11 +8,11 @@
 
     # 2) 训练支援狗；它的目标位由 assist shaping 固定在球侧后方
     python -m train.train_ppo --role assist --steps 5000000 --envs 8 \
-        --peer-opponents pkg_soccer/policy_2v2_attack_actor.npz \
+        --peer-teammate runs/2v2_warm/attack_policy.npz \
         --out runs/assist41
 
-    # 3) 从 29 维 1v1 权重热启动（新增的两个槽位权重先置 0，行为与旧策略一致）
-    python -m train.train_ppo --role attacker --init pkg_soccer/policy_duel_attacker_actor.npz \
+    # 3) 从同结构、同合约的蒸馏权重热启动
+    python -m train.train_ppo --role attacker --init runs/2v2_warm/attack_distilled.npz \
         --steps 5000000 --out runs/a41_warm
 
 **只训练一只狗**：受控狗（attacker=0 号，defender=1 号）由 PPO 决策，
@@ -188,69 +188,46 @@ def tensorboard_dir(out):
     return os.path.join(out, 'tb')
 
 
-def load_initial_weights(model, npz_path, obs_dim, action_scale=None):
-    """把部署端 npz 拷进 sb3 模型；第一层多出来的输入列置 0。
+def load_initial_weights(model, npz_path, obs_dim, action_scale=None,
+                         contact_offset=(0.10, 0.0), role='attacker'):
+    """仅允许同观测合约、同结构、同速度档的精确 actor 热启动。
 
-    29 维 → 41 维时，前 29 列照抄、后 12 列置 0，因此初始策略与旧权重
-    完全等价（新槽位一开始被忽略），这是最稳的热启动方式。
-
-    `action_scale` 与参考权重不同（换速度档）时，把输出层对应行的权重
-    按 `旧缩放/新缩放` 缩小 —— tanh 在小信号下近似线性，所以初始"m/s 行为"
-    与旧策略接近，网络只需学会"同样的动作要更早收脚"。
+    换观测布局、胸部偏移或网络深度时请先运行 train.distill_actor；
+    插入单位矩阵不能抵消新增 tanh，缩放输出 logits 也不保留物理速度。
+    验证全部完成后才复制，失败不会留下部分更新的 actor。
     """
     import torch
+    from pkg_soccer.rl_control import Actor
 
-    reference = np.load(npz_path, allow_pickle=False)
-    wanted = {}
-    indices = sorted(int(key[6:-7]) for key in reference.files
-                     if key.startswith('actor_') and key.endswith('_weight'))
-    if not indices or indices[0] != 0:
-        raise SystemExit('参考权重没有有效 actor 层')
-    for index in indices:
-        prefix = ('action_net' if index == indices[-1]
-                  else 'mlp_extractor.policy_net.{}'.format(index))
-        weight = reference[f'actor_{index}_weight']
-        bias = reference[f'actor_{index}_bias']
-        if index == 0 and weight.shape[1] != obs_dim:
-            if weight.shape[1] > obs_dim:
-                raise SystemExit(
-                    f'参考权重是 {weight.shape[1]} 维，比目标 {obs_dim} 维还大')
-            padded = np.zeros((weight.shape[0], obs_dim), dtype=np.float32)
-            padded[:, :weight.shape[1]] = weight
-            weight = padded
-        if index == indices[-1] and action_scale is not None:
-            old = np.asarray(reference['action_scale'], np.float32) \
-                if 'action_scale' in reference else np.array([0.45, 0.20, 0.70],
-                                                             np.float32)
-            new = np.asarray(action_scale, np.float32)
-            ratio = (old / new).astype(np.float32)
-            if not np.allclose(ratio, 1.0):
-                weight = weight * ratio[:, None]
-                bias = bias * ratio
-                print('换档热启动：输出层按 {} 缩放'.format(
-                    np.round(ratio, 3).tolist()))
-        wanted[f'{prefix}.weight'] = torch.as_tensor(weight, dtype=torch.float32)
-        wanted[f'{prefix}.bias'] = torch.as_tensor(bias, dtype=torch.float32)
+    actor = Actor(npz_path)
+    accepted_roles = ('attack', 'attacker') if role == 'attacker' else (role,)
+    if (actor.obs_dim != obs_dim or actor.peer_order != 'opponent_first' or
+            actor.role not in accepted_roles or
+            not np.allclose(actor.contact_offset or (0., 0.), contact_offset)):
+        raise ValueError('参考策略的角色/观测合约不一致，请先蒸馏后再使用 --init')
+    if action_scale is not None and not np.allclose(actor.scale, action_scale):
+        raise ValueError('参考策略速度档不一致，不支持通过缩放输出层近似迁移')
     state = model.policy.state_dict()
+    prefixes = sorted({name.rsplit('.', 1)[0] for name in state
+                       if name.startswith('mlp_extractor.policy_net.')},
+                      key=lambda name: int(name.rsplit('.', 1)[1]))
+    prefixes.append('action_net')
+    if len(prefixes) != len(actor.layers):
+        raise ValueError('网络深度不一致，请使用 train.distill_actor 扩大网络')
+    wanted = {}
+    for prefix, (weight, bias) in zip(prefixes, actor.layers):
+        for suffix, value in (('weight', weight), ('bias', bias)):
+            name = prefix + '.' + suffix
+            tensor = torch.as_tensor(value, device=state[name].device,
+                                     dtype=state[name].dtype)
+            if tensor.shape != state[name].shape:
+                raise ValueError(f'{name} 形状不一致：{tensor.shape} vs '
+                                 f'{state[name].shape}，请先蒸馏')
+            wanted[name] = tensor
     with torch.no_grad():
         for name, tensor in wanted.items():
-            if name not in state:
-                raise SystemExit(f'{name} 形状不匹配：'
-                                 f'{state.get(name).shape if name in state else None} '
-                                 f'vs {tuple(tensor.shape)}')
-            target = state[name]
-            if target.shape != tensor.shape:
-                # 扩大网络时保留旧矩阵的左上角，其余神经元用零初始化。
-                expanded = torch.zeros_like(target)
-                rows = min(target.shape[0], tensor.shape[0])
-                cols = min(target.shape[1], tensor.shape[1]) if tensor.ndim == 2 else None
-                if tensor.ndim == 2:
-                    expanded[:rows, :cols].copy_(tensor[:rows, :cols])
-                else:
-                    expanded[:rows].copy_(tensor[:rows])
-                tensor = expanded
             state[name].copy_(tensor)
-    print(f'已用 {npz_path} 热启动（第一层输入 {obs_dim} 维，新增列置 0）')
+    print(f'已精确加载 actor：{npz_path}；critic 从头学习')
 
 
 def main(argv=None):
@@ -331,6 +308,10 @@ def main(argv=None):
     parser.add_argument('--ent-coef', type=float, default=0.005,
                         help='熵系数（默认 0.005）。微调时降到 0.0005~0.001，'
                              '否则探索噪声会让已经收敛的动作变抖')
+    parser.add_argument('--target-kl', type=float, default=0.015,
+                        help='单次 PPO 更新的 KL 提前停止阈值，限制策略突变')
+    parser.add_argument('--log-std-init', type=float, default=-0.5,
+                        help='新建策略的探索噪声；蒸馏后微调建议 -1.5')
     parser.add_argument('--scripted-speed', type=float, default=0.30,
                         help='脚本队友/对手的物理速度（m/s）。默认 0.30；'
                              '想模拟"对手也快"时给 0.6 左右')
@@ -339,7 +320,7 @@ def main(argv=None):
     parser.add_argument('--peer-teammate', default='', help='只给队友指定 npz')
     parser.add_argument('--peer-opponents', default='', help='只给对手指定 npz')
     parser.add_argument('--init', default='',
-                        help='从部署端 npz 热启动（29 维可自动补零到 41 维）')
+                        help='从同结构、同角色/观测合约/速度的 npz 精确热启动')
     parser.add_argument('--resume', default='',
                         help='从 SB3 .zip 检查点继续训练；网络结构必须一致')
     parser.add_argument('--out', default='runs/attacker41')
@@ -359,6 +340,10 @@ def main(argv=None):
         raise SystemExit('--speed-scale 必须在 [1.0, 3.3]（前进 ≤ 1.5 m/s）')
     if not 32 <= args.net_width <= 1024 or not 2 <= args.net_depth <= 12:
         raise SystemExit('--net-width 应在 32..1024，--net-depth 应在 2..12')
+    if not np.isfinite(args.target_kl) or args.target_kl <= 0:
+        raise SystemExit('--target-kl 必须为正数')
+    if not np.isfinite(args.log_std_init):
+        raise SystemExit('--log-std-init 必须为有限数')
     action_scale = (BASE_SCALE[0] * args.speed_scale,
                     BASE_SCALE[1] * args.speed_scale,
                     BASE_SCALE[2])
@@ -430,13 +415,15 @@ def main(argv=None):
             n_steps=512, batch_size=2048, learning_rate=args.lr,
             gamma=0.995, gae_lambda=0.95, clip_range=0.2,
             ent_coef=args.ent_coef, vf_coef=0.5, max_grad_norm=0.5,
+            target_kl=args.target_kl,
             policy_kwargs=dict(net_arch=[args.net_width] * args.net_depth,
                                activation_fn=nn.Tanh,
-                               log_std_init=-0.5),
+                               log_std_init=args.log_std_init),
             tensorboard_log=None if args.no_tb else tensorboard_dir(args.out),
             verbose=1, seed=args.seed)
     if args.init and not args.resume:
-        load_initial_weights(model, args.init, args.obs_dim, action_scale)
+        load_initial_weights(model, args.init, args.obs_dim, action_scale,
+                             (args.contact_offset_x, args.contact_offset_y), args.role)
     checkpoint = CheckpointCallback(
         save_freq=max(1, args.checkpoint_every // max(1, args.envs)),
         save_path=os.path.join(args.out, 'ckpt'),
@@ -465,6 +452,7 @@ def main(argv=None):
                 reward_front=float(args.reward_front),
                 reward_back=float(args.reward_back),
                 lr=float(args.lr), ent_coef=float(args.ent_coef),
+                target_kl=float(args.target_kl), log_std_init=float(args.log_std_init),
                 ball_restitution=ball.get('ball_restitution'),
                 ball_drag=ball.get('ball_drag'),
                 scripted_speed=float(args.scripted_speed),

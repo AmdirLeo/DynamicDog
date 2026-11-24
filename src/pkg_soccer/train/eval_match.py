@@ -19,7 +19,7 @@ import math
 import numpy as np
 
 from . import scripted
-from .team_env import EnvConfig, TeamEnv
+from .team_env import DOG_RADIUS, EnvConfig, TeamEnv
 
 DT = 0.05
 HALF_STEPS = int(240.0 / DT)
@@ -36,7 +36,8 @@ def controlled_indices(args):
     return [0, 1] if args.team == 0 else [2, 3]
 
 
-def run_half(env, actors, roles, steps=HALF_STEPS, speed=scripted.SPEED):
+def run_half(env, actors, roles, steps=HALF_STEPS, speed=scripted.SPEED,
+             metrics=None, team=0):
     events = {}
     for _ in range(steps):
         obs = env.observations()
@@ -46,6 +47,14 @@ def run_half(env, actors, roles, steps=HALF_STEPS, speed=scripted.SPEED):
             actions[index] = np.clip(np.asarray(actor(env.observation_for_actor(index, actor)), np.float32),
                                      -1.0, 1.0)
         _, _, done, info = env.step(actions)
+        if metrics is not None:
+            first, second = team * 2, team * 2 + 1
+            near = np.linalg.norm(env.pos[first] - env.pos[second]) < 2 * DOG_RADIUS + .18
+            both_ball = all(np.linalg.norm(env.pos[i] - env.ball) < .8
+                            for i in (first, second))
+            metrics['steps'] = metrics.get('steps', 0) + 1
+            metrics['teammate_near'] = metrics.get('teammate_near', 0) + int(near)
+            metrics['both_near_ball'] = metrics.get('both_near_ball', 0) + int(both_ball)
         for kind, _team in info['events']:
             events[kind] = events.get(kind, 0) + 1
         if done:
@@ -123,11 +132,13 @@ def main(argv=None):
             roles[index] = 'attacker' if index % 2 == 0 else 'support'
     events = {}
     scores = []
+    metrics = {}
     for half in range(args.halves):
         # 独立种子和全新开场，不能让上半场的死球状态污染下一次评估。
         env = TeamEnv(env.cfg, seed=args.seed + half)
         half_events = run_half(env, actors, roles,
-                               speed=args.scripted_speed)
+                               speed=args.scripted_speed, metrics=metrics,
+                               team=args.team)
         scores.append(tuple(int(v) for v in env.score))
         for kind, count in half_events.items():
             events[kind] = events.get(kind, 0) + count
@@ -138,6 +149,10 @@ def main(argv=None):
     won = sum(s[args.team] > s[1-args.team] for s in scores)
     print(f'至少进一球的半场={scored}/{args.halves}；获胜半场={won}/{args.halves}；'
           '这不是单次射门命中率；固定 attack/assist，不含实机角色切换。')
+    print('队友距离<0.62m 时间比例={:.2%}；同时距球<0.8m 时间比例={:.2%}；'
+          '这两项是接近程度，不是碰撞次数。'.format(
+              metrics['teammate_near'] / metrics['steps'],
+              metrics['both_near_ball'] / metrics['steps']))
     print(f'合计：0队={int(totals[0])} 1队={int(totals[1])} '
           f'事件={events} 受控狗={sorted(actors) or "无"} 模式='
           f'{"策略" if actors else "全脚本"} 观测={args.obs_dim} 维 '
