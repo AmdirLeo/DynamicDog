@@ -37,7 +37,7 @@ class MotionRecorder(Node):
         dog_name = self.param('dog_name', 'mi_desktop_48_b0_2d_7b_03_fd').strip('/')
         default_cmd = '/' + (dog_name+'/' if dog_name else '') + 'motion_servo_cmd'
         self.cmd_topic = self.param('command_topic', default_cmd)
-        self.dog_topic = self.param('dog_pose_topic', '/vrpn/xll_dog/pose')
+        self.dog_topic = self.param('dog_pose_topic', '/vrpn/Lizj_dog/pose')
         self.ball_topic = self.param('ball_pose_topic', '/vrpn/ball/pose')
         output = self.param('output', '')
         if not output:

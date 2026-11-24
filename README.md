@@ -129,8 +129,8 @@ ros2 pkg executables pkg_soccer                 # → pkg_soccer soccer
 
 ```bash
 DOG_NAME=mi_desktop_48_b0_2d_5f_bd_98   # ★ 本机运控命名空间，查：ros2 topic list | grep motion_status
-TEAM_A_1=/vrpn/Lizj_dog/pose            # ★ 本机狗刚体，查：ros2 topic list | grep vrpn
-TEAM_A_2=/vrpn/team_a_2/pose            # 队友/对手刚体名按当天动捕建的名字填
+TEAM_A_1=/vrpn/xll_dog/pose             # ★ 队友的狗（setup 里第一个）
+TEAM_A_2=/vrpn/Lizj_dog/pose            # ★ 我的机器狗（setup 里第二个），查：ros2 topic list | grep vrpn
 TEAM_B_1=/vrpn/team_b_1/pose
 TEAM_B_2=/vrpn/team_b_2/pose
 ```
@@ -152,7 +152,7 @@ TEAM_B_2=/vrpn/team_b_2/pose
 - 两个**只告警不拦截**的结构性问题：队友/对手话题与本狗话题相同（策略会把自己当成别人）、
   `shared_2v2` 下两个对手话题相同（次近对手槽位重复同一只狗）。
 - 也可以用环境变量临时覆盖，不改文件：
-  `DOG_NAME=xxx TEAM_A_1=/vrpn/Lizj_dog/pose ./start.sh A1`
+  `DOG_NAME=xxx TEAM_A_2=/vrpn/Lizj_dog/pose ./start.sh A2`
 - 写法必须是 `${VAR:-默认值}`（冒号 + 减号）。写成 `${VAR:默认值}` 会被 bash 当成
   **子串截取**，配合脚本开头的 `set -u` 报 `VAR: unbound variable`，看着像未定义，
   其实是少了那个 `-`。
@@ -160,7 +160,7 @@ TEAM_B_2=/vrpn/team_b_2/pose
 > ⚠️ `shared_2v2`（41 维）要求 **dog / ball / teammate / opponent / opponent2 五路都有数据**，
 > 少一路就永久停在 `WAIT_POSE`（日志会打印缺哪一路）。只有两只狗时用
 > `RL_POLICY=duel_attacker`（29 维）；只有本狗 + 球时用
-> `RL_POLICY=stage2 ENABLE_MOTION=false ./start.sh A1` 先把链路跑通。
+> `RL_POLICY=stage2 ENABLE_MOTION=false ./start.sh A2` 先把链路跑通。
 
 ### 2.4 启动顺序
 
@@ -170,10 +170,10 @@ ros2 launch vrpn_listener sync_entity_state.launch
 ros2 topic list | grep vrpn                     # 确认 4 只狗 + 球的 pose 都在
 
 # ② 空跑：只推理、不发运动指令（换场地/换话题必做）
-cd ~/lizj && ENABLE_MOTION=false ./start.sh A1
+cd ~/lizj && ENABLE_MOTION=false ./start.sh A2
 
 # ③ 真跑
-ENABLE_MOTION=true ./start.sh A1
+ENABLE_MOTION=true ./start.sh A2
 ```
 
 `ENABLE_MOTION=false` 时节点照常算策略、打日志（`|v|`、状态、观测是否齐全），
@@ -188,14 +188,17 @@ ros2 topic echo /vrpn/ball/pose --once          # 球刚体有数据
 
 ### 2.5 四个角色
 
-| 角色 | 本狗 | 队友 | 对手 | 进攻方向 |
-|---|---|---|---|---|
-| `A1` | TEAM_A_1 | TEAM_A_2 | B1 + B2 | `goal_right` |
-| `A2` | TEAM_A_2 | TEAM_A_1 | B1 + B2 | `goal_right` |
-| `B1` | TEAM_B_1 | TEAM_B_2 | A1 + A2 | `goal_left` |
-| `B2` | TEAM_B_2 | TEAM_B_1 | A1 + A2 | `goal_left` |
+| 角色 | 本狗 | 队友 | 对手 | 进攻方向 | 谁用 |
+|---|---|---|---|---|---|
+| `A1` | TEAM_A_1 | TEAM_A_2 | B1 + B2 | `goal_right` | **队友**（setup 里第一个） |
+| `A2` | TEAM_A_2 | TEAM_A_1 | B1 + B2 | `goal_right` | **我**（setup 里第二个，默认角色） |
+| `B1` | TEAM_B_1 | TEAM_B_2 | A1 + A2 | `goal_left` | 对手 |
+| `B2` | TEAM_B_2 | TEAM_B_1 | A1 + A2 | `goal_left` | 对手 |
 
-同一队的两只狗必须用不同角色（`A1` / `A2`），队友话题互指；两只都用 `A1` 会把彼此当对手。
+约定：两人共用这份 setup 时，队友永远是 A1，我永远是 A2；我的动捕话题是 `TEAM_A_2`
+（`/vrpn/Lizj_dog/pose`），队友的是 `TEAM_A_1`（`/vrpn/xll_dog/pose`）。
+`./start.sh` 不带参数时默认就是 A2。两只狗必须用不同角色、队友话题互指；
+两台机器都跑 A1 会把彼此当对手。
 
 ---
 
@@ -237,7 +240,7 @@ ros2 topic echo /vrpn/ball/pose --once          # 球刚体有数据
 想回退到策略原始速度（0.45 m/s）：
 
 ```bash
-RL_SPEED_LIMIT=0.45 RL_SPEED_GAIN=1.0 ./start.sh A1
+RL_SPEED_LIMIT=0.45 RL_SPEED_GAIN=1.0 ./start.sh A2
 ```
 
 也可以直接给绝对值：`RL_SPEED_LIMIT=1.2 RL_SPEED_GAIN=2.0` → 满舵 0.9 m/s。
@@ -260,7 +263,10 @@ RL_SPEED_LIMIT=0.45 RL_SPEED_GAIN=1.0 ./start.sh A1
 | `rl_dash` | `false` | 高速短冲（1.5 m/s × 450 ms），与训练端同规则 |
 | `rl_dash_goal_cone` | `0.9` | 短冲只在朝对方球门 ±52° 内触发 |
 | `enable_motion` | `false`（start.sh） | false = 只推理、不发运动指令 |
-| `dog_pose_topic` | `/vrpn/xll_dog/pose` | 本狗刚体 |
+| `dog_pose_topic` | `/vrpn/Lizj_dog/pose` | 本狗刚体（A2；队友的 `/vrpn/xll_dog/pose` 只作 teammate） |
+| `dog_center_offset_x` | `0` m | 刚体原点 → 实际质心的偏移（刚体系 +x 朝狗头），用原始动捕朝向旋转 |
+| `dog_center_offset_y` | `0` m | 同上，刚体系 +y 朝左；只作用于本狗，不改队友/对手 |
+| `dog_radius` | `0` m | 狗的等效碰撞半径；0=关闭。非 0 时两只狗中心距 < 2×半径+0.10 m 且正在靠近 → 去掉径向速度、保留绕行和转向 |
 | `teammate_pose_topic` | 空 | 队友刚体（2v2 必填） |
 | `opponent_pose_topic` | 空 | 对手 1 刚体 |
 | `opponent2_pose_topic` | 空 | 对手 2 刚体 |
@@ -271,6 +277,12 @@ RL_SPEED_LIMIT=0.45 RL_SPEED_GAIN=1.0 ./start.sh A1
 | `resume_timeout` | 25 s | 暂停兜底放行时间 |
 
 参数都是**只读**启动参数，改要重启节点。
+
+`start.sh` 中对应的环境变量：`DOG_CENTER_OFFSET_X` / `DOG_CENTER_OFFSET_Y` / `DOG_RADIUS`。
+标定质心偏移的办法：让狗原地朝 +x 站好，量动捕刚体原点到实际机身中心的水平距离；
+向狗头偏为正 x，向狗左偏为正 y。装反了会看到狗绕球方向整体偏一个固定角度/距离。
+`dog_radius` 取机身后半部到尾部的最大半径，CyberDog 一般 0.25~0.30 m；
+避让只在 `control_mode:=rl` 且 2v2 队友话题有效时生效。
 
 ---
 
@@ -327,7 +339,7 @@ k = [x for x in w.files if 'weight' in x][0]
 print(w[k].shape, w['action_scale'], w['role'])"
 
 # 话题是否在发（动捕正常时每帧都有）
-ros2 topic hz /vrpn/xll_dog/pose
+ros2 topic hz /vrpn/Lizj_dog/pose
 ros2 topic echo /vrpn/ball/pose --once
 ```
 

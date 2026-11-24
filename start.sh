@@ -4,7 +4,9 @@ set -euo pipefail
 # 2v2 shared-policy launcher.
 #   1) 首次使用：改 DOG_NAME 和四个 VRPN 话题（或用同名环境变量覆盖）
 #   2) 启动：./start.sh A1|A2|B1|B2
-ROLE="${1:-A1}"
+# 角色约定（两人共用一份 setup）：队友始终是 A1（第一个），我始终是 A2（第二个）。
+# 因此本机默认角色是 A2，本狗话题走 TEAM_A_2；不要再用 A1 跑本机。
+ROLE="${1:-A2}"
 ENABLE_MOTION="${ENABLE_MOTION:-false}"
 RL_POLICY="${RL_POLICY:-shared_2v2}"
 RL_MODEL_PATH="${RL_MODEL_PATH:-}"
@@ -16,15 +18,58 @@ RL_SPEED_GAIN="${RL_SPEED_GAIN:-0}"
 RL_CONTINUE_DEADZONE="${RL_CONTINUE_DEADZONE:-true}"
 RL_DEADZONE_SPEED_LIMIT="${RL_DEADZONE_SPEED_LIMIT:-0.35}"
 
+# 动捕刚体原点 → 狗实际质心的偏移（米，刚体系：+x 朝狗头、+y 朝左）。
+# 例：刚体装在屁股上、质心在前方 8 cm、偏左 2 cm → 0.08 / 0.02。
+DOG_CENTER_OFFSET_X="${DOG_CENTER_OFFSET_X:-0}"
+DOG_CENTER_OFFSET_Y="${DOG_CENTER_OFFSET_Y:-0}"
+# 狗的等效碰撞半径（米）；两只狗中心距 < 2×半径+0.10 m 时不再朝队友加速。
+# 0 = 关闭避让；CyberDog 建议 0.25~0.30。
+DOG_RADIUS="${DOG_RADIUS:-0}"
+
 # 运动接口命名空间：/<DOG_NAME>/motion_servo_cmd 的前缀。
 # 留空 = 用节点默认值 mi_desktop_48_b0_2d_7b_03_fd，很可能不是本机，务必核对：
 #   ros2 topic list | grep motion_status
 DOG_NAME="${DOG_NAME:-}"
 
-TEAM_A_1="${TEAM_A_1:-/vrpn/xll_dog/pose}"
-TEAM_A_2="${TEAM_A_2:-/vrpn/team_a_2/pose}"
-TEAM_B_1="${TEAM_B_1:-/vrpn/team_b_1/pose}"
-TEAM_B_2="${TEAM_B_2:-/vrpn/team_b_2/pose}"
+# 占位话题的默认值，单独定义一次：下面既用它做默认值，也用它判定"是否还没填"。
+DEF_A1="/vrpn/xll_dog/pose"            # 队友（setup 里的第一个）
+DEF_A2="/vrpn/Lizj_dog/pose"           # 我的机器狗（setup 里的第二个）
+DEF_B1="/vrpn/team_b_1/pose"
+DEF_B2="/vrpn/team_b_2/pose"
+
+TEAM_A_1="${TEAM_A_1:-$DEF_A1}"
+TEAM_A_2="${TEAM_A_2:-$DEF_A2}"
+TEAM_B_1="${TEAM_B_1:-$DEF_B1}"
+TEAM_B_2="${TEAM_B_2:-$DEF_B2}"
+
+# ros2 按字面量推断参数类型："0" 是 INTEGER，"0.0" 才是 DOUBLE。
+# 节点把这些参数声明为 double，传整数形式会报
+#   InvalidParameterTypeException: Trying to set parameter 'rl_speed_gain'
+#   to '0' of type 'INTEGER', expecting type 'DOUBLE'
+# 所以统一格式化成带小数点的写法；布尔同理（传 1/0 会变成 INTEGER）。
+as_double() {
+  local v="$1"
+  if [[ ! "$v" =~ ^-?([0-9]+(\.[0-9]*)?|\.[0-9]+)([eE][-+]?[0-9]+)?$ ]]; then
+    echo "参数必须是数字：$v" >&2
+    exit 2
+  fi
+  printf '%.3f' "$v"
+}
+as_bool() {
+  case "$1" in
+    true|True|TRUE|1|yes|on) echo true ;;
+    false|False|FALSE|0|no|off) echo false ;;
+    *) echo "布尔参数只能是 true/false：$1" >&2; exit 2 ;;
+  esac
+}
+RL_SPEED_LIMIT="$(as_double "$RL_SPEED_LIMIT")"
+RL_SPEED_GAIN="$(as_double "$RL_SPEED_GAIN")"
+RL_DEADZONE_SPEED_LIMIT="$(as_double "$RL_DEADZONE_SPEED_LIMIT")"
+DOG_CENTER_OFFSET_X="$(as_double "$DOG_CENTER_OFFSET_X")"
+DOG_CENTER_OFFSET_Y="$(as_double "$DOG_CENTER_OFFSET_Y")"
+DOG_RADIUS="$(as_double "$DOG_RADIUS")"
+RL_CONTINUE_DEADZONE="$(as_bool "$RL_CONTINUE_DEADZONE")"
+ENABLE_MOTION="$(as_bool "$ENABLE_MOTION")"
 
 case "$ROLE" in
   A1) DOG_TOPIC="$TEAM_A_1"; TEAMMATE_TOPIC="$TEAM_A_2"; OPPONENT_TOPIC="$TEAM_B_1"; OPPONENT2_TOPIC="$TEAM_B_2"; GOAL=goal_right ;;
@@ -37,7 +82,7 @@ esac
 # 占位话题判定（只有这几条默认值算"没填"）
 is_placeholder() {
   case "$1" in
-    /vrpn/xll_dog/pose|/vrpn/team_a_2/pose|/vrpn/team_b_1/pose|/vrpn/team_b_2/pose) return 0 ;;
+    "$DEF_A1"|"$DEF_A2"|"$DEF_B1"|"$DEF_B2") return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -135,6 +180,9 @@ else
   add_opt rl_model_path "$RL_MODEL_PATH"
 fi
 add_opt dog_name "$DOG_NAME"
+add_opt dog_center_offset_x "$DOG_CENTER_OFFSET_X"
+add_opt dog_center_offset_y "$DOG_CENTER_OFFSET_Y"
+add_opt dog_radius "$DOG_RADIUS"
 add_opt teammate_pose_topic "$TEAMMATE_TOPIC"
 add_opt opponent_pose_topic "$OPPONENT_TOPIC"
 add_opt opponent2_pose_topic "$OPPONENT2_TOPIC"

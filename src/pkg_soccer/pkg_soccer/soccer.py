@@ -81,12 +81,15 @@ class Soccer(Node):
                 # 0.45 档 → ×2.667 = 1.2 m/s）。转向不放大。
                 speed_gain=float(self.param('rl_speed_gain', 0.0)),
                 continue_deadzone=bool(self.param('rl_continue_deadzone', True)),
-                deadzone_speed_limit=float(self.param('rl_deadzone_speed_limit', 0.35)))
+                deadzone_speed_limit=float(self.param('rl_deadzone_speed_limit', 0.35)),
+                collision_radius=self.dog_radius)
         self.enable_motion = self.param('enable_motion', False)
         if type(self.enable_motion) is not bool:
             raise ValueError('enable_motion 必须为 true/false')
         self.dog_name = self.param('dog_name', 'mi_desktop_48_b0_2d_7b_03_fd').strip('/')
-        self.dog_topic = self.param('dog_pose_topic', '/vrpn/xll_dog/pose')
+        # 本机是 A2（setup 里的第二个）；队友 A1 的 /vrpn/xll_dog/pose 只在
+        # teammate_pose_topic 里用，绝不能当本狗话题，否则策略会把自己当队友。
+        self.dog_topic = self.param('dog_pose_topic', '/vrpn/Lizj_dog/pose')
         self.ball_topic = self.fixed_param('ball_pose_topic', '/vrpn/ball/pose') if fixed_profile else self.param('ball_pose_topic', '/vrpn/ball/pose')
         self.opponent_topic = self.param('opponent_pose_topic', '').strip()
         self.teammate_topic = self.param('teammate_pose_topic', '').strip()
@@ -110,6 +113,20 @@ class Soccer(Node):
         # Keep the default unrotated; a field-specific override remains
         # available for a future rigid-body remount.
         self.yaw_offset = float(self.param('dog_yaw_offset', 0.0))
+        # 动捕刚体原点 → 狗实际质心的偏移（米，刚体坐标系：+x 朝狗头、+y 朝左）。
+        # 只在 dog 位姿上补偿；队友/对手由各自的节点上报，参数不带到他们身上。
+        self.dog_center_offset_x = float(self.param('dog_center_offset_x', 0.0))
+        self.dog_center_offset_y = float(self.param('dog_center_offset_y', 0.0))
+        # 狗的碰撞半径（米），0 = 关闭队友避让。CyberDog 建议 0.25~0.30。
+        self.dog_radius = float(self.param('dog_radius', 0.0))
+        if not all(math.isfinite(v) for v in (
+                self.dog_center_offset_x, self.dog_center_offset_y, self.dog_radius)):
+            raise ValueError('dog_center_offset_x/y、dog_radius 必须是有限数值')
+        if (abs(self.dog_center_offset_x) > 0.5 or
+                abs(self.dog_center_offset_y) > 0.5):
+            raise ValueError('dog_center_offset_x/y 必须在 ±0.5 m 内')
+        if not 0.0 <= self.dog_radius <= 0.6:
+            raise ValueError('dog_radius 必须在 [0, 0.6] m（0=关闭避让）')
         self.dog_quaternion = None
         self.posture_timeout = float(self.param('posture_timeout', 1.0))
         self.stand_timeout = float(self.param('stand_timeout', 25.0))
@@ -261,7 +278,11 @@ class Soccer(Node):
             f'速度上限：行走={self.controller.cfg.approach_speed:.2f}m/s，'
             f'触球={self.controller.cfg.kick_speed:.2f}m/s；'
             f'步态 motion_id={self.walk_motion_id}；'
-            f'狗朝向修正 dog_yaw_offset={self.yaw_offset:.3f}rad')
+            f'狗朝向修正 dog_yaw_offset={self.yaw_offset:.3f}rad；'
+            f'质心偏移（刚体系，米）x={self.dog_center_offset_x:.3f}, '
+            f'y={self.dog_center_offset_y:.3f}；'
+            f'碰撞半径={self.dog_radius:.2f}m'
+            f'{"（队友避让开启）" if self.dog_radius > 0 else "（队友避让关闭）"}')
         if self.control_mode == 'rl':
             self.get_logger().info(
                 f'RL {self.rl_policy} 已加载（{self.controller.actor.obs_dim} 维）；'
@@ -306,11 +327,17 @@ class Soccer(Node):
             p, q = msg.pose.position, msg.pose.orientation
             if not all(math.isfinite(v) for v in (p.x, p.y, p.z)):
                 raise ValueError('动捕位置包含无效数值')
-            yaw = (wrap_angle(yaw_from_quaternion(q.x, q.y, q.z, q.w) + self.yaw_offset)
-                   if kind == 'dog' else
-                   (wrap_angle(yaw_from_quaternion(q.x, q.y, q.z, q.w) +
-                               self.opponent_yaw_offset)
+            raw_yaw = yaw_from_quaternion(q.x, q.y, q.z, q.w)
+            yaw = (wrap_angle(raw_yaw + self.yaw_offset) if kind == 'dog' else
+                   (wrap_angle(raw_yaw + self.opponent_yaw_offset)
                     if kind in ('opponent', 'opponent2', 'teammate') else 0.0))
+            x, y = p.x*self.position_scale, p.y*self.position_scale
+            if kind == 'dog' and (self.dog_center_offset_x or self.dog_center_offset_y):
+                # 偏移定义在刚体系（不是加了 yaw_offset 之后的朝向）：
+                # 用动捕原始朝向旋转，保证改 dog_yaw_offset 不会改变质心位置。
+                co, si = math.cos(raw_yaw), math.sin(raw_yaw)
+                x += self.dog_center_offset_x*co - self.dog_center_offset_y*si
+                y += self.dog_center_offset_x*si + self.dog_center_offset_y*co
             if kind == 'dog':
                 self.dog_quaternion = (q.x, q.y, q.z, q.w)
             stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
@@ -321,8 +348,7 @@ class Soccer(Node):
             updater = (self.controller.update_peer
                        if peer and hasattr(self.controller, 'update_peer')
                        else self.controller.update)
-            updater(kind, p.x*self.position_scale, p.y*self.position_scale,
-                    yaw, now, frame, stamp)
+            updater(kind, x, y, yaw, now, frame, stamp)
         except (ValueError, TypeError, AttributeError) as exc:
             setattr(self.controller, kind, None)
             if self.control_mode == 'rl' and kind in self.controller.tracks:

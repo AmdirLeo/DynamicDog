@@ -75,8 +75,20 @@ class RLController(Controller):
 
     def __init__(self, config, model_path='', speed_limit=0.30, policy='stage2',
                  speed_gain=1.0, continue_deadzone=True,
-                 deadzone_speed_limit=0.35):
+                 deadzone_speed_limit=0.35, collision_radius=0.0,
+                 teammate_margin=0.10):
         super().__init__(config)
+        # 队友避让：collision_radius 是单只狗的等效半径（米），0=关闭。
+        # 两只狗中心距 < 2*radius + margin 时，去掉速度中"靠近队友"的分量。
+        self.collision_radius = float(collision_radius)
+        self.teammate_margin = float(teammate_margin)
+        if not (math.isfinite(self.collision_radius) and
+                0.0 <= self.collision_radius <= 0.6):
+            raise ValueError('collision_radius 必须在 [0, 0.6] m（0=关闭避让）')
+        if not (math.isfinite(self.teammate_margin) and
+                0.0 <= self.teammate_margin <= 1.0):
+            raise ValueError('teammate_margin 必须在 [0, 1.0] m')
+        self.collision_active = False
         if policy not in ('stage2', 'attacker', 'defender', 'shared_2v2', 'shared_2v2_large'):
             raise ValueError('rl_policy 必须为 stage2/attacker/defender/shared_2v2/shared_2v2_large')
         self.policy = policy
@@ -253,9 +265,48 @@ class RLController(Controller):
         except (ValueError, FloatingPointError, OverflowError) as exc:
             self.stop('RL 推理失败：' + str(exc))
             velocity = self.ZERO
+        velocity = self.avoid_teammate(velocity, now)
         # The next observation reflects the command after limits/protection.
         self.previous_action = np.asarray(velocity, dtype=np.float32)/self.effective_scale
         return velocity
+
+    def avoid_teammate(self, velocity, now):
+        """去掉机身系速度中"朝队友靠近"的分量，防止两只狗贴在一起。
+
+        只在 2v2 已配置队友时生效；转向保留（可以边绕边走）。
+        这是安全层，不改变策略输出的其它分量，也不参与训练观测以外的状态。
+        """
+        self.collision_active = False
+        if (self.collision_radius <= 0 or not self.team2v2 or
+                self.dog is None or self.teammate is None):
+            return velocity
+        if ('teammate' not in self.tracks or
+                not self.tracks['teammate'].valid(now)):
+            return velocity
+        dx, dy = self.teammate.x - self.dog.x, self.teammate.y - self.dog.y
+        distance = math.hypot(dx, dy)
+        limit = 2.0*self.collision_radius + self.teammate_margin
+        if distance >= limit or distance < 1e-6:
+            return velocity
+        # 世界系相对位置 → 机身系单位向量（机身 +x 朝狗头）。
+        yaw = self.dog.yaw
+        ux = (math.cos(yaw)*dx + math.sin(yaw)*dy)/distance
+        uy = (-math.sin(yaw)*dx + math.cos(yaw)*dy)/distance
+        vx, vy = float(velocity[0]), float(velocity[1])
+        approach = vx*ux + vy*uy
+        if approach <= 0.0:
+            # 已经在远离/只是擦边经过，不干预策略输出。
+            return velocity
+        if distance <= 2.0*self.collision_radius:
+            # 已经贴上且还在靠近：只保留转向，平移清零，避免继续挤压。
+            vx = vy = 0.0
+        else:
+            # 还没贴上：去掉径向接近分量，保留绕行（切向）分量。
+            vx -= approach*ux
+            vy -= approach*uy
+        self.collision_active = True
+        self.reason += f'；队友避让(d={distance:.2f}m)'
+        return np.array([vx, vy, velocity[2]], dtype=np.float32)
 
     def field_coordinates(self, x, y):
         c = self.cfg
