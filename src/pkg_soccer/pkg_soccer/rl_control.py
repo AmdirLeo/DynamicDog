@@ -127,12 +127,19 @@ class RLController(Controller):
             self.speed_gain = min(max(self.speed_gain, 0.2), 4.0)
         self.effective_scale = np.array(
             [scale[0]*self.speed_gain, scale[1]*self.speed_gain, scale[2]], np.float32)
-        self.tracks = {'dog': Track(3.0), 'ball': Track(12.0)}
+        # 短时动捕断流外推：断流超过 gap 后用最后速度/加速度外推 prediction_timeout。
+        pg = float(config.prediction_timeout)
+        self.tracks = {'dog': Track(3.0, prediction_gap=pg),
+                       'ball': Track(12.0, prediction_gap=pg)}
         if self.duel:
-            self.tracks['opponent'] = Track(3.0)
+            self.tracks['opponent'] = Track(3.0, prediction_gap=pg)
         if self.team2v2:
-            self.tracks['teammate'] = Track(3.0)
-            self.tracks['opponent2'] = Track(3.0)
+            self.tracks['teammate'] = Track(3.0, prediction_gap=pg)
+            self.tracks['opponent2'] = Track(3.0, prediction_gap=pg)
+        for name in self.tracks:
+            self._observed.setdefault(name, None)
+            self._velocity.setdefault(name, (0.0, 0.0, 0.0))
+            self._acceleration.setdefault(name, (0.0, 0.0, 0.0))
         self.opponent = None
         self.teammate = None
         self.opponent2 = None
@@ -151,7 +158,7 @@ class RLController(Controller):
             self.update_peer(kind, x, y, yaw, now, frame, stamp)
             return
         if kind == 'ball' and self.duel:
-            previous = self.ball
+            previous = self._observed.get('ball')
             # Referee placement can jump across a goal line. Do not count a
             # discontinuous or stale trajectory as a goal or retain touch state.
             if previous is not None:
@@ -170,11 +177,23 @@ class RLController(Controller):
             raise ValueError('单狗模式不接收对手位姿')
         if not all(math.isfinite(v) for v in (x, y, yaw, now, stamp)) or stamp < 0:
             setattr(self, kind, None)
+            self._observed[kind] = None
             self.tracks[kind].invalidate('invalid_pose')
             return
-        previous = getattr(self, kind)
+        previous = self._observed.get(kind)
         sequence = previous.sequence + 1 if previous is not None else 1
-        setattr(self, kind, Pose(x, y, yaw, now, frame, stamp, sequence))
+        pose = Pose(x, y, yaw, now, frame, stamp, sequence)
+        if previous is not None and previous.frame == frame and now > previous.received:
+            dt = now - previous.received
+            old = self._velocity.get(kind, (0.0, 0.0, 0.0))
+            velocity = ((x-previous.x)/dt, (y-previous.y)/dt,
+                        wrap_angle(yaw-previous.yaw)/dt)
+            self._acceleration[kind] = tuple((velocity[j]-old[j])/dt
+                                             for j in range(3))
+            self._velocity[kind] = velocity
+        self._observed[kind] = pose
+        self._predicted.discard(kind)
+        setattr(self, kind, pose)
         self.tracks[kind].update(now, stamp, x, y, yaw, frame)
         if kind == 'opponent':
             self.opponent = getattr(self, kind)
@@ -185,9 +204,12 @@ class RLController(Controller):
         if not self.duel:
             return True
         peer_names = ('teammate', 'opponent', 'opponent2') if self.team2v2 else ('opponent',)
+        # 断流时 super().poses_valid 已用 _predict_missing 外推 peer 位姿，
+        # 外推帧的 received 会被更新，故容差加上 prediction_timeout。
+        peer_max_age = min(0.20, self.cfg.pose_timeout) + self.cfg.prediction_timeout
         return all((getattr(self, name) is not None and
                     getattr(self, name).frame == self.dog.frame and
-                    0 <= now-getattr(self, name).received <= self.cfg.pose_timeout)
+                    0 <= now-getattr(self, name).received <= peer_max_age)
                    for name in peer_names)
 
     def observation(self, now):

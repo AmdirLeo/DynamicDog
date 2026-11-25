@@ -184,6 +184,8 @@ class Soccer(Node):
         self.goal_confirm = 0
         self.goal_pair = (0, 0)
         self.goal_reference = None
+        # 球门只在开场标定一次；锁定后忽略动捕更新，运行中不再依赖球门话题。
+        self.goals_locked = False
         self.goal_note = '等待两个球门的动捕位姿'
         self.detected_frame = self.world_frame or None
         self.goal_raw = {}
@@ -362,6 +364,9 @@ class Soccer(Node):
 
     def on_goal(self, name, msg):
         """保存球门刚体原点，同时应用正式运行时的门中心偏移。"""
+        # 球场标定完成后锁定：忽略后续动捕抖动/断流，避免比赛中被重标定打断。
+        if self.goals_locked:
+            return
         now = time.monotonic()
         try:
             frame = self.message_frame(msg)
@@ -377,9 +382,6 @@ class Soccer(Node):
                 raise ValueError(name + ' 位姿无效')
             previous = self.goals.get(name)
             if previous is not None:
-                if now - previous.received > self.controller.cfg.pose_timeout:
-                    self.goal_confirm = 0
-                    self.controller.wait_for_pose('球门动捕曾断流，重新确认')
                 if stamp > 0 and previous.stamp > 0 and stamp <= previous.stamp:
                     # 以实际回调时间判断新鲜度；不把复用的 VRPN stamp 当成重复帧。
                     stamp = previous.stamp
@@ -452,10 +454,12 @@ class Soccer(Node):
         return True
 
     def configure_goals(self, now):
-        """从两门中心标定球场；运行中移动球门必须重启并重新标定。"""
+        """从两门中心标定球场；标定一次后锁定，运行中不再依赖球门话题。"""
         if not self.use_mocap_goals:
             return True
         c = self.controller
+        if self.goals_locked:
+            return True
         left, right = self.goals.get('goal_left'), self.goals.get('goal_right')
         if left is None or right is None:
             self.goal_confirm = 0
@@ -467,35 +471,14 @@ class Soccer(Node):
             self.goal_note = '未收到：' + ', '.join(missing)
             return False
         poses = (left, right)
-        if any(not 0 <= now - p.received <= self.goal_pose_timeout for p in poses):
-            self.goal_confirm = 0
-            ages = ', '.join(f'{name}={now - pose.received:.2f}s'
-                             for name, pose in zip(('left', 'right'), poses))
-            self.goal_note = (f'球门数据过期（{ages}，允许 '
-                              f'{self.goal_pose_timeout:.1f}s）')
-            return False
         if left.frame != right.frame:
-            self.goal_confirm = 0
             self.goal_note = f'两门坐标系不一致：{left.frame!r} / {right.frame!r}'
-            return False
-        pair = (left.sequence, right.sequence)
-        if pair[0] != self.goal_pair[0] and pair[1] != self.goal_pair[1]:
-            self.goal_confirm += 1
-            self.goal_pair = pair
-        if self.goal_confirm < 3:
-            self.goal_note = '等待两个球门连续三组有效位姿'
             return False
         target, own = (right, left) if self.attack_goal == 'goal_right' else (left, right)
         length = math.hypot(target.x - own.x, target.y - own.y)
         if length < 2*c.cfg.behind_distance:
             self.goal_note = '两门距离过近，检查单位、刚体名或门中心偏移'
             return False
-        if self.goal_reference is not None:
-            if any(math.hypot(p.x - ref.x, p.y - ref.y) > 0.10
-                   for p, ref in zip(poses, self.goal_reference)):
-                c.stop('球门位置变化超过 10cm，请重新标定并重启')
-                return False
-            return True
         yaw = math.atan2(target.y - own.y, target.x - own.x)
         config = c.cfg._replace(
             goal_x=target.x, goal_y=target.y, goal_yaw=yaw,
@@ -510,8 +493,8 @@ class Soccer(Node):
                                      field_max_x=self.field_length/2)
         config.validate()
         c.cfg = config
-        c.wait_for_pose('球门已标定，确认狗与球的定位')
         self.goal_reference = poses
+        self.goals_locked = True
         self.get_logger().info(
             f'球场标定完成：goal_left=({left.x:.3f},{left.y:.3f})，'
             f'goal_right=({right.x:.3f},{right.y:.3f}) 米；进攻 {self.attack_goal}，'
