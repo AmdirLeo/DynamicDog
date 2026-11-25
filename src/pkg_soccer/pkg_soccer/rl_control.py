@@ -11,6 +11,7 @@ from pathlib import Path
 import numpy as np
 
 from .control import Controller, Pose, wrap_angle
+from .defense import DefensePlanner
 from .measurement import Track
 
 
@@ -76,7 +77,7 @@ class RLController(Controller):
     def __init__(self, config, model_path='', speed_limit=0.30, policy='stage2',
                  speed_gain=1.0, continue_deadzone=True,
                  deadzone_speed_limit=0.35, collision_radius=0.0,
-                 teammate_margin=0.10):
+                 teammate_margin=0.10, defense_config=None):
         super().__init__(config)
         # 队友避让：collision_radius 是单只狗的等效半径（米），0=关闭。
         # 两只狗中心距 < 2*radius + margin 时，去掉速度中"靠近队友"的分量。
@@ -152,6 +153,16 @@ class RLController(Controller):
         self.deadlock_since = None
         from .attack import AttackPlanner
         self.attack_planner = AttackPlanner() if policy == 'attacker' else None
+        # 危险区固定防守：只在有对手的模式启用；关闭时 planner 为 None。
+        # 默认启用，start.sh 可用 DEFENSE_ENABLE=false 关闭。
+        cfg_defense = dict(defense_config or {})
+        defense_enabled = bool(cfg_defense.get('enable', True)) and self.duel
+        self.defense_planner = (DefensePlanner(
+            fraction=cfg_defense.get('fraction', 1.0/3.0),
+            hysteresis=cfg_defense.get('hysteresis', 0.40),
+            carrier_dist=cfg_defense.get('carrier_dist', 0.60),
+            contact_dist=cfg_defense.get('contact_dist', 0.50),
+        ) if defense_enabled else None)
 
     def update(self, kind, x, y, yaw, now, frame, stamp):
         if kind in ('opponent', 'opponent2', 'teammate'):
@@ -399,6 +410,8 @@ class RLController(Controller):
                 self.state = 'WAIT_PLAY'
             if self.attack_planner:
                 self.attack_planner.reset()
+            if self.defense_planner:
+                self.defense_planner.reset()
             return self.ZERO
         if self.started_at is not None and now-self.started_at >= self.cfg.max_run_time:
             self.stop('RL 达到运行时间上限')
@@ -410,6 +423,8 @@ class RLController(Controller):
             self.deadlock_since = None
             if self.attack_planner:
                 self.attack_planner.reset()
+            if self.defense_planner:
+                self.defense_planner.reset()
             return self.ZERO
         if self.scored:
             self.goals += 1
@@ -436,6 +451,8 @@ class RLController(Controller):
         if deadzone_wait and not self.continue_deadzone:
             if self.attack_planner:
                 self.attack_planner.reset()
+            if self.defense_planner:
+                self.defense_planner.reset()
             return self.ZERO
         if self.state == 'WAIT_POSE':
             pair = (d.sequence, b.sequence)
@@ -458,6 +475,14 @@ class RLController(Controller):
                 velocity = np.asarray(override, dtype=np.float32)
             mode, reason = self.attack_planner.state, self.attack_planner.reason
             velocity = self.attack_planner.limit_contact(self, velocity)
+        # 危险区固定防守：在 attack 的 limit_contact 之后覆盖，否则
+        # limit_contact 会消掉"靠近对手"的速度分量，与冲撞意图相反。
+        # 仍走下面的机身轴限幅/总速度上限/场地边界预测，保持安全 envelope。
+        if self.defense_planner and not self.deadzone_active:
+            override = self.defense_planner.command(self, now)
+            if override is not None:
+                velocity = np.asarray(override, dtype=np.float32)
+                mode, reason = self.defense_planner.state, self.defense_planner.reason
         # Rules and RL share the same body-axis envelope and total speed cap.
         velocity = np.asarray(velocity, dtype=np.float32)
         axis_ratio = max(1., abs(velocity[0])/self.effective_scale[0],

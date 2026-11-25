@@ -267,6 +267,11 @@ RL_SPEED_LIMIT=0.45 RL_SPEED_GAIN=1.0 ./start.sh A2
 | `dog_center_offset_x` | `0` m | 刚体原点 → 实际质心的偏移（刚体系 +x 朝狗头），用原始动捕朝向旋转 |
 | `dog_center_offset_y` | `0` m | 同上，刚体系 +y 朝左；只作用于本狗，不改队友/对手 |
 | `dog_radius` | `0` m | 狗的等效碰撞半径；0=关闭。非 0 时两只狗中心距 < 2×半径+0.10 m 且正在靠近 → 去掉径向速度、保留绕行和转向 |
+| `defense_enable` | `true` | 危险区固定防守总开关（仅 1v1/2v2）；球在我方半场近本方门且对手持球时覆盖网络权重冲对手，详见 `代码使用说明.md` §10.1 |
+| `defense_fraction` | `0.333` | 危险距离 = 该比例×场长（默认 1/3） |
+| `defense_hysteresis` | `0.40` | 滞回半带宽（m），防边缘反复切换 |
+| `defense_carrier_dist` | `0.60` | 判"对手持球"的球-对手距离上限（m） |
+| `defense_contact_dist` | `0.50` | 判"已贴身"的狗-对手距离，到达后停平移（m） |
 | `teammate_pose_topic` | 空 | 队友刚体（2v2 必填） |
 | `opponent_pose_topic` | 空 | 对手 1 刚体 |
 | `opponent2_pose_topic` | 空 | 对手 2 刚体 |
@@ -278,7 +283,8 @@ RL_SPEED_LIMIT=0.45 RL_SPEED_GAIN=1.0 ./start.sh A2
 
 参数都是**只读**启动参数，改要重启节点。
 
-`start.sh` 中对应的环境变量：`DOG_CENTER_OFFSET_X` / `DOG_CENTER_OFFSET_Y` / `DOG_RADIUS`。
+`start.sh` 中对应的环境变量：`DOG_CENTER_OFFSET_X` / `DOG_CENTER_OFFSET_Y` / `DOG_RADIUS`，
+以及防守的 `DEFENSE_ENABLE` / `DEFENSE_FRACTION` / `DEFENSE_HYSTERESIS` / `DEFENSE_CARRIER_DIST` / `DEFENSE_CONTACT_DIST`。
 标定质心偏移的办法：让狗原地朝 +x 站好，量动捕刚体原点到实际机身中心的水平距离；
 向狗头偏为正 x，向狗左偏为正 y。装反了会看到狗绕球方向整体偏一个固定角度/距离。
 `dog_radius` 取机身后半部到尾部的最大半径，CyberDog 一般 0.25~0.30 m；

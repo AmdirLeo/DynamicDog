@@ -18,6 +18,15 @@ RL_SPEED_GAIN="${RL_SPEED_GAIN:-0}"
 RL_CONTINUE_DEADZONE="${RL_CONTINUE_DEADZONE:-true}"
 RL_DEADZONE_SPEED_LIMIT="${RL_DEADZONE_SPEED_LIMIT:-0.35}"
 
+# 危险区固定防守（仅 1v1/2v2 生效）：球进入我方半场且距本方门≤FRACTION×场长、
+# 且对手持球时，规则接管策略，直冲持球对手直到贴身。默认开启。
+# 滞回带宽 HYSTERESIS 防止球在阈值边缘时反复切换状态。
+DEFENSE_ENABLE="${DEFENSE_ENABLE:-true}"
+DEFENSE_FRACTION="${DEFENSE_FRACTION:-0.333}"
+DEFENSE_HYSTERESIS="${DEFENSE_HYSTERESIS:-0.4}"
+DEFENSE_CARRIER_DIST="${DEFENSE_CARRIER_DIST:-0.6}"
+DEFENSE_CONTACT_DIST="${DEFENSE_CONTACT_DIST:-0.5}"
+
 # 动捕刚体原点 → 狗实际质心的偏移（米，刚体系：+x 朝狗头、+y 朝左）。
 # 例：刚体装在屁股上、质心在前方 8 cm、偏左 2 cm → 0.08 / 0.02。
 DOG_CENTER_OFFSET_X="${DOG_CENTER_OFFSET_X:-0}"
@@ -69,8 +78,13 @@ RL_DEADZONE_SPEED_LIMIT="$(as_double "$RL_DEADZONE_SPEED_LIMIT")"
 DOG_CENTER_OFFSET_X="$(as_double "$DOG_CENTER_OFFSET_X")"
 DOG_CENTER_OFFSET_Y="$(as_double "$DOG_CENTER_OFFSET_Y")"
 DOG_RADIUS="$(as_double "$DOG_RADIUS")"
+DEFENSE_FRACTION="$(as_double "$DEFENSE_FRACTION")"
+DEFENSE_HYSTERESIS="$(as_double "$DEFENSE_HYSTERESIS")"
+DEFENSE_CARRIER_DIST="$(as_double "$DEFENSE_CARRIER_DIST")"
+DEFENSE_CONTACT_DIST="$(as_double "$DEFENSE_CONTACT_DIST")"
 RL_CONTINUE_DEADZONE="$(as_bool "$RL_CONTINUE_DEADZONE")"
 ENABLE_MOTION="$(as_bool "$ENABLE_MOTION")"
+DEFENSE_ENABLE="$(as_bool "$DEFENSE_ENABLE")"
 
 case "$ROLE" in
   A1) DOG_TOPIC="$TEAM_A_1"; TEAMMATE_TOPIC="$TEAM_A_2"; OPPONENT_TOPIC="$TEAM_B_1"; OPPONENT2_TOPIC="$TEAM_B_2"; GOAL=goal_right ;;
@@ -185,6 +199,11 @@ add_opt dog_name "$DOG_NAME"
 add_opt dog_center_offset_x "$DOG_CENTER_OFFSET_X"
 add_opt dog_center_offset_y "$DOG_CENTER_OFFSET_Y"
 add_opt dog_radius "$DOG_RADIUS"
+add_opt defense_enable "$DEFENSE_ENABLE"
+add_opt defense_fraction "$DEFENSE_FRACTION"
+add_opt defense_hysteresis "$DEFENSE_HYSTERESIS"
+add_opt defense_carrier_dist "$DEFENSE_CARRIER_DIST"
+add_opt defense_contact_dist "$DEFENSE_CONTACT_DIST"
 add_opt teammate_pose_topic "$TEAMMATE_TOPIC"
 add_opt opponent_pose_topic "$OPPONENT_TOPIC"
 add_opt opponent2_pose_topic "$OPPONENT2_TOPIC"

@@ -85,6 +85,18 @@ class Soccer(Node):
             raise ValueError('dog_center_offset_x/y 必须在 ±0.5 m 内')
         if not 0.0 <= self.dog_radius <= 0.6:
             raise ValueError('dog_radius 必须在 [0, 0.6] m（0=关闭避让）')
+        # 危险区固定防守：默认开启，仅在有对手的策略(1v1/2v2)下真正生效。
+        # 阈值以"占球场长度的比例"给出，滞回区间避免球在边缘时状态反复切换。
+        self.defense_enable = bool(self.param('defense_enable', True))
+        self.defense_fraction = float(self.param('defense_fraction', 1.0/3.0))
+        self.defense_hysteresis = float(self.param('defense_hysteresis', 0.40))
+        self.defense_carrier_dist = float(self.param('defense_carrier_dist', 0.60))
+        self.defense_contact_dist = float(self.param('defense_contact_dist', 0.50))
+        defense_config = dict(
+            enable=self.defense_enable, fraction=self.defense_fraction,
+            hysteresis=self.defense_hysteresis,
+            carrier_dist=self.defense_carrier_dist,
+            contact_dist=self.defense_contact_dist)
         self.controller = Controller(Config(**values))
         if self.control_mode == 'rl':
             from .rl_control import RLController
@@ -97,7 +109,7 @@ class Soccer(Node):
                 speed_gain=float(self.param('rl_speed_gain', 0.0)),
                 continue_deadzone=bool(self.param('rl_continue_deadzone', True)),
                 deadzone_speed_limit=float(self.param('rl_deadzone_speed_limit', 0.35)),
-                collision_radius=self.dog_radius)
+                collision_radius=self.dog_radius, defense_config=defense_config)
         self.enable_motion = self.param('enable_motion', False)
         if type(self.enable_motion) is not bool:
             raise ValueError('enable_motion 必须为 true/false')
@@ -294,6 +306,14 @@ class Soccer(Node):
                 f'平移限速={self.controller.speed_limit:.2f}m/s；'
                 'max_kicks 不适用于连续 RL 控制，进球/超时/故障时结束；'
                 f'模式={"实机控制" if self.enable_motion else "只推理、不发运动指令"}')
+            dp = getattr(self.controller, 'defense_planner', None)
+            self.get_logger().info(
+                '危险区固定防守：' + (
+                    f'开启（距本方门≤{self.defense_fraction:.2f}×场长，'
+                    f'滞回±{self.defense_hysteresis:.2f}m，'
+                    f'持球判定≤{self.defense_carrier_dist:.2f}m，'
+                    f'贴身≤{self.defense_contact_dist:.2f}m）'
+                    if dp is not None else '关闭'))
 
     def param(self, name, default):
         """启动参数只读，避免运行时变更却未实际应用。"""
