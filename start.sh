@@ -31,11 +31,12 @@ DOG_RADIUS="${DOG_RADIUS:-0}"
 #   ros2 topic list | grep motion_status
 DOG_NAME="${DOG_NAME:-}"
 
-# 占位话题的默认值，单独定义一次：下面既用它做默认值，也用它判定"是否还没填"。
-DEF_A1="/vrpn/xll_dog/pose"            # 队友（setup 里的第一个）
-DEF_A2="/vrpn/Lizj_dog/pose"           # 我的机器狗（setup 里的第二个）
-DEF_B1="/vrpn/team_b_1/pose"
-DEF_B2="/vrpn/team_b_2/pose"
+# 话题默认值：DEF_A2 是本机已确认的真实刚体，其余三条仍是"待填占位"。
+# 占位判定只针对尚未确认的话题（见 is_placeholder），不要把所有默认值都当占位。
+DEF_A1="/vrpn/xll_dog/pose"            # 队友（setup 里的第一个），当天按真实刚体名填
+DEF_A2="/vrpn/Lizj_dog/pose"           # 我的机器狗（setup 里的第二个），已确认
+DEF_B1="/vrpn/team_b_1/pose"           # 对手，占位
+DEF_B2="/vrpn/team_b_2/pose"           # 对手，占位
 
 TEAM_A_1="${TEAM_A_1:-$DEF_A1}"
 TEAM_A_2="${TEAM_A_2:-$DEF_A2}"
@@ -79,10 +80,11 @@ case "$ROLE" in
   *) echo "用法：$0 A1|A2|B1|B2" >&2; exit 2 ;;
 esac
 
-# 占位话题判定（只有这几条默认值算"没填"）
+# 占位话题判定：DEF_A2 是本机确认过的真实刚体，不算占位；
+# 其余三条是待填占位，裸启动时应拦下提醒用户按当天动捕名覆盖。
 is_placeholder() {
   case "$1" in
-    "$DEF_A1"|"$DEF_A2"|"$DEF_B1"|"$DEF_B2") return 0 ;;
+    "$DEF_A1"|"$DEF_B1"|"$DEF_B2") return 0 ;;
     *) return 1 ;;
   esac
 }

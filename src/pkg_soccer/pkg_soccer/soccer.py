@@ -70,6 +70,21 @@ class Soccer(Node):
                                          field_min_y=-2.75, field_max_y=2.75)
         values = {name: self.param(name, default)
                   for name, default in defaults._asdict().items()}
+        # 动捕刚体原点 → 狗实际质心的偏移（米，刚体系：+x 朝狗头、+y 朝左）。
+        # 只在 dog 位姿上补偿；队友/对手由各自的节点上报，参数不带到他们身上。
+        self.dog_center_offset_x = float(self.param('dog_center_offset_x', 0.0))
+        self.dog_center_offset_y = float(self.param('dog_center_offset_y', 0.0))
+        # 狗的碰撞半径（米），0 = 关闭队友避让。CyberDog 建议 0.25~0.30。
+        # 必须在构造 RLController 前读取：collision_radius 直接引用本属性。
+        self.dog_radius = float(self.param('dog_radius', 0.0))
+        if not all(math.isfinite(v) for v in (
+                self.dog_center_offset_x, self.dog_center_offset_y, self.dog_radius)):
+            raise ValueError('dog_center_offset_x/y、dog_radius 必须是有限数值')
+        if (abs(self.dog_center_offset_x) > 0.5 or
+                abs(self.dog_center_offset_y) > 0.5):
+            raise ValueError('dog_center_offset_x/y 必须在 ±0.5 m 内')
+        if not 0.0 <= self.dog_radius <= 0.6:
+            raise ValueError('dog_radius 必须在 [0, 0.6] m（0=关闭避让）')
         self.controller = Controller(Config(**values))
         if self.control_mode == 'rl':
             from .rl_control import RLController
@@ -113,20 +128,6 @@ class Soccer(Node):
         # Keep the default unrotated; a field-specific override remains
         # available for a future rigid-body remount.
         self.yaw_offset = float(self.param('dog_yaw_offset', 0.0))
-        # 动捕刚体原点 → 狗实际质心的偏移（米，刚体坐标系：+x 朝狗头、+y 朝左）。
-        # 只在 dog 位姿上补偿；队友/对手由各自的节点上报，参数不带到他们身上。
-        self.dog_center_offset_x = float(self.param('dog_center_offset_x', 0.0))
-        self.dog_center_offset_y = float(self.param('dog_center_offset_y', 0.0))
-        # 狗的碰撞半径（米），0 = 关闭队友避让。CyberDog 建议 0.25~0.30。
-        self.dog_radius = float(self.param('dog_radius', 0.0))
-        if not all(math.isfinite(v) for v in (
-                self.dog_center_offset_x, self.dog_center_offset_y, self.dog_radius)):
-            raise ValueError('dog_center_offset_x/y、dog_radius 必须是有限数值')
-        if (abs(self.dog_center_offset_x) > 0.5 or
-                abs(self.dog_center_offset_y) > 0.5):
-            raise ValueError('dog_center_offset_x/y 必须在 ±0.5 m 内')
-        if not 0.0 <= self.dog_radius <= 0.6:
-            raise ValueError('dog_radius 必须在 [0, 0.6] m（0=关闭避让）')
         self.dog_quaternion = None
         self.posture_timeout = float(self.param('posture_timeout', 1.0))
         self.stand_timeout = float(self.param('stand_timeout', 25.0))
