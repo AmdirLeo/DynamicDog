@@ -40,12 +40,18 @@ DOG_RADIUS="${DOG_RADIUS:-0}"
 #   ros2 topic list | grep motion_status
 DOG_NAME="${DOG_NAME:-}"
 
-# 话题默认值：DEF_A2 是本机已确认的真实刚体，其余三条仍是"待填占位"。
-# 占位判定只针对尚未确认的话题（见 is_placeholder），不要把所有默认值都当占位。
-DEF_A1="/vrpn/xll_dog/pose"            # 队友（setup 里的第一个），当天按真实刚体名填
-DEF_A2="/vrpn/Lizj_dog/pose"           # 我的机器狗（setup 里的第二个），已确认
-DEF_B1="/vrpn/team_b_1/pose"           # 对手，占位
-DEF_B2="/vrpn/team_b_2/pose"           # 对手，占位
+# 话题默认值：当天真实刚体名。比赛前用 ros2 topic list | grep vrpn 核对。
+DEF_A1="/vrpn/xll_dog/pose"            # 队友（setup 里的第一个）
+DEF_A2="/vrpn/Lizj_dog/pose"           # 我的机器狗（setup 里的第二个）
+DEF_B1="/vrpn/zbj_dog/pose"            # 对手 1
+DEF_B2="/vrpn/lp_dog/pose"             # 对手 2
+
+# 占位哨兵：只有这些"通用假名"算没填（见 is_placeholder）。
+# 判断的是字面量而不是 DEF_* 变量——否则把真实名填进 DEF_* 后
+# 检查仍拿新默认值当占位符，填了也白填。
+PLACEHOLDER_A1="/vrpn/team_a_1/pose"
+PLACEHOLDER_B1="/vrpn/team_b_1/pose"
+PLACEHOLDER_B2="/vrpn/team_b_2/pose"
 
 TEAM_A_1="${TEAM_A_1:-$DEF_A1}"
 TEAM_A_2="${TEAM_A_2:-$DEF_A2}"
@@ -94,11 +100,12 @@ case "$ROLE" in
   *) echo "用法：$0 A1|A2|B1|B2" >&2; exit 2 ;;
 esac
 
-# 占位话题判定：DEF_A2 是本机确认过的真实刚体，不算占位；
-# 其余三条是待填占位，裸启动时应拦下提醒用户按当天动捕名覆盖。
+# 占位话题判定：只认固定的通用哨兵字符串（PLACEHOLDER_*）。
+# DEF_* 里填的真实刚体名（xll_dog/zbj_dog/lp_dog 等）不算占位；
+# 想恢复"未填拦截"效果，把对应 DEF_* 改回哨兵值即可。
 is_placeholder() {
   case "$1" in
-    "$DEF_A1"|"$DEF_B1"|"$DEF_B2") return 0 ;;
+    "$PLACEHOLDER_A1"|"$PLACEHOLDER_B1"|"$PLACEHOLDER_B2") return 0 ;;
     *) return 1 ;;
   esac
 }

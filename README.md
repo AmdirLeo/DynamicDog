@@ -136,8 +136,8 @@ ros2 pkg executables pkg_soccer                 # → pkg_soccer soccer
 DOG_NAME=mi_desktop_48_b0_2d_5f_bd_98   # ★ 本机运控命名空间，查：ros2 topic list | grep motion_status
 TEAM_A_1=/vrpn/xll_dog/pose             # ★ 队友的狗（setup 里第一个）
 TEAM_A_2=/vrpn/Lizj_dog/pose            # ★ 我的机器狗（setup 里第二个），查：ros2 topic list | grep vrpn
-TEAM_B_1=/vrpn/team_b_1/pose
-TEAM_B_2=/vrpn/team_b_2/pose
+TEAM_B_1=/vrpn/zbj_dog/pose             # 对手 1
+TEAM_B_2=/vrpn/lp_dog/pose              # 对手 2
 ```
 
 - `DOG_NAME` 是**运控接口**的命名空间（`/<DOG_NAME>/motion_servo_cmd`），
@@ -145,6 +145,8 @@ TEAM_B_2=/vrpn/team_b_2/pose
   `mi_desktop_48_b0_2d_7b_03_fd` 只是占位，填错的话指令发到不存在的 topic，
   **狗一步不动且没有任何报错**。
 - `start.sh` 的话题检查**按策略判定**，只查当前策略真正用到的通道（缺哪条会逐条列出来）：
+  占位判定只认固定哨兵值（`/vrpn/team_a_1/pose` 这类通用假名）——把 `DEF_*`
+  改成真实刚体名后检查自动通过，改回哨兵值则恢复拦截。
 
   | `RL_POLICY` | 维度 | 必须有的通道 |
   |---|---|---|
