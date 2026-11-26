@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 已筛选的 CV52 双网络实测配置；对手由每场比赛的命令行指定。
+# 已筛选的 T11 双网络实测配置；对手由每场比赛的命令行指定。
 set -eo pipefail
 
 usage() {
@@ -62,7 +62,7 @@ POLICY_DIR="$(python3 -c 'from pathlib import Path; import pkg_soccer; print(Pat
 ATTACK_MODEL="$POLICY_DIR/policy_2v2_attack_actor.npz"
 ASSIST_MODEL="$POLICY_DIR/policy_2v2_assist_actor.npz"
 if [[ ! -f "$ATTACK_MODEL" || ! -f "$ASSIST_MODEL" ]]; then
-  echo "安装目录缺少 CV52 双网络权重，请重新 colcon build --packages-select pkg_soccer" >&2; exit 2
+  echo "安装目录缺少 T11 双网络权重，请重新 colcon build --packages-select pkg_soccer" >&2; exit 2
 fi
 
 # 多台狗共享 ROS 网络时不能猜测要控制哪台，必须明确 DOG_NAME。
@@ -77,7 +77,7 @@ if [[ -z "$DOG_NAME" && "$ENABLE_MOTION" == true ]]; then
   DOG_NAME="${NAMES[0]}"
 fi
 DOG_NAME="${DOG_NAME#/}"; DOG_NAME="${DOG_NAME%/}"
-echo "CV52 | $ROLE=$TEAM_ROLE | dog=$DOG_TOPIC | teammate=$TEAMMATE_TOPIC"
+echo "T11 | $ROLE=$TEAM_ROLE | dog=$DOG_TOPIC | teammate=$TEAMMATE_TOPIC"
 echo "对手=$OPPONENT_TOPIC,$OPPONENT2_TOPIC | 进攻=$GOAL | 速度=0.45 m/s | 运动=$ENABLE_MOTION | 接口=$DOG_NAME"
 echo "权重：$ATTACK_MODEL + $ASSIST_MODEL；队友预测=regression_velocity"
 ARGS=(

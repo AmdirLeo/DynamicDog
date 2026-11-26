@@ -19,7 +19,7 @@ PACKAGE = ROOT / 'pkg_soccer'
 class MatchProfileTest(unittest.TestCase):
     def test_shipped_pair_is_the_evaluated_checkpoint(self):
         expected = {
-            'attack': 'dab1b1fb7b8b8012b218174198b502defa825cebeac2a02993a88b4137eeab5d',
+            'attack': '1dc4f550a1d9bb8a41c9b7b41d91497ac942de654abfb4523802b13841c17d06',
             'assist': '4a233f145390299e7d28b56d6cacf19ae294be868d3c48080dbafb26dc0b490e',
         }
         for role, digest in expected.items():
