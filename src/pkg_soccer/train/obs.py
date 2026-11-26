@@ -111,7 +111,8 @@ def make_obs(dog_x, dog_y, dog_yaw, dog_vel, dog_w,
              field=DEFAULT_FIELD, obs_dim=OBS_DIM_DUEL,
              opponent=None, opponent_age=0.0,
              teammate=None, teammate_age=0.0,
-             opponent2=None, opponent2_age=0.0):
+             opponent2=None, opponent2_age=0.0,
+             contact_offset=(0.10, 0.0)):
     """按 `rl_control.observation` 的顺序拼 23/29/41 维观测。
 
     opponent / teammate / opponent2 = (x, y, yaw, (vx, vy))；
@@ -127,7 +128,10 @@ def make_obs(dog_x, dog_y, dog_yaw, dog_vel, dog_w,
         return (co * x + si * y, -si * x + co * y)
 
     dog_vel = (float(dog_vel[0]), float(dog_vel[1]))
-    rel = body(ball_x - dog_x, ball_y - dog_y)
+    ox, oy = contact_offset
+    contact_x = dog_x + co * ox - si * oy
+    contact_y = dog_y + si * ox + co * oy
+    rel = body(ball_x - contact_x, ball_y - contact_y)
     goal = body(c.goal_x - dog_x, c.goal_y - dog_y)
     dv = body(dog_vel[0], dog_vel[1])
     bv = body(ball_vel[0], ball_vel[1])

@@ -72,16 +72,27 @@ class Soccer(Node):
                   for name, default in defaults._asdict().items()}
         self.controller = Controller(Config(**values))
         if self.control_mode == 'rl':
-            from .rl_control import RLController
-            self.controller = RLController(
+            from .teammate_prediction import controller_class
+            self.teammate_prediction_model = self.param(
+                'rl_teammate_prediction_model', 'legacy_acceleration')
+            rl_controller = controller_class(self.teammate_prediction_model)
+            if not team2v2 and self.teammate_prediction_model != 'legacy_acceleration':
+                raise ValueError('队友 regression_velocity 预测仅用于 2v2 RL')
+            self.team_role = self.param('team_role', 'attack')
+            if team2v2 and self.team_role not in ('attack', 'assist'):
+                raise ValueError('2v2 team_role 必须为 attack 或 assist')
+            self.controller = rl_controller(
                 Config(**values), self.param('rl_model_path', ''),
-                float(self.fixed_param('rl_speed_limit', 1.2) if fixed_profile else
-                      self.param('rl_speed_limit', 1.2)), self.rl_policy,
-                # 0 = 自动：满舵前进恰好等于 rl_speed_limit（shared_2v2 的
-                # 0.45 档 → ×2.667 = 1.2 m/s）。转向不放大。
+                float(self.fixed_param('rl_speed_limit', 0.45) if fixed_profile else
+                      self.param('rl_speed_limit', 0.45)), self.rl_policy,
+                # 0 = 自动：满舵前进恰好等于 rl_speed_limit；转向不放大。
                 speed_gain=float(self.param('rl_speed_gain', 0.0)),
                 continue_deadzone=bool(self.param('rl_continue_deadzone', True)),
-                deadzone_speed_limit=float(self.param('rl_deadzone_speed_limit', 0.35)))
+                deadzone_speed_limit=float(self.param('rl_deadzone_speed_limit', 0.35)),
+                team_role=self.team_role,
+                attack_model_path=self.param('rl_attack_model_path', ''),
+                assist_model_path=self.param('rl_assist_model_path', ''),
+                auto_role_switch=bool(self.param('rl_auto_role_switch', True)))
         self.enable_motion = self.param('enable_motion', False)
         if type(self.enable_motion) is not bool:
             raise ValueError('enable_motion 必须为 true/false')
@@ -166,6 +177,7 @@ class Soccer(Node):
         self.goal_confirm = 0
         self.goal_pair = (0, 0)
         self.goal_reference = None
+        self.goals_locked = False
         self.goal_note = '等待两个球门的动捕位姿'
         self.detected_frame = self.world_frame or None
         self.goal_raw = {}
@@ -267,6 +279,8 @@ class Soccer(Node):
                 f'RL {self.rl_policy} 已加载（{self.controller.actor.obs_dim} 维）；'
                 f'队友话题={self.teammate_topic if team2v2 else "不使用"}；'
                 f'对手话题={self.opponent_topic if duel else "不使用"}；'
+                f'队内角色={getattr(self.controller, "team_role", "-")}；'
+                f'队友预测={self.teammate_prediction_model}；'
                 f'平移限速={self.controller.speed_limit:.2f}m/s；'
                 'max_kicks 不适用于连续 RL 控制，进球/超时/故障时结束；'
                 f'模式={"实机控制" if self.enable_motion else "只推理、不发运动指令"}')
@@ -335,6 +349,9 @@ class Soccer(Node):
 
     def on_goal(self, name, msg):
         """保存球门刚体原点，同时应用正式运行时的门中心偏移。"""
+        # 球门只用于开场一次标定；锁定后忽略后续动捕更新和短时断流。
+        if self.goals_locked:
+            return
         now = time.monotonic()
         try:
             frame = self.message_frame(msg)
@@ -350,9 +367,6 @@ class Soccer(Node):
                 raise ValueError(name + ' 位姿无效')
             previous = self.goals.get(name)
             if previous is not None:
-                if now - previous.received > self.controller.cfg.pose_timeout:
-                    self.goal_confirm = 0
-                    self.controller.wait_for_pose('球门动捕曾断流，重新确认')
                 if stamp > 0 and previous.stamp > 0 and stamp <= previous.stamp:
                     # 以实际回调时间判断新鲜度；不把复用的 VRPN stamp 当成重复帧。
                     stamp = previous.stamp
@@ -425,10 +439,12 @@ class Soccer(Node):
         return True
 
     def configure_goals(self, now):
-        """从两门中心标定球场；运行中移动球门必须重启并重新标定。"""
+        """收到两门首帧后标定并锁定球场；运行中不再依赖球门话题。"""
         if not self.use_mocap_goals:
             return True
         c = self.controller
+        if self.goals_locked:
+            return True
         left, right = self.goals.get('goal_left'), self.goals.get('goal_right')
         if left is None or right is None:
             self.goal_confirm = 0
@@ -440,23 +456,8 @@ class Soccer(Node):
             self.goal_note = '未收到：' + ', '.join(missing)
             return False
         poses = (left, right)
-        if any(not 0 <= now - p.received <= self.goal_pose_timeout for p in poses):
-            self.goal_confirm = 0
-            ages = ', '.join(f'{name}={now - pose.received:.2f}s'
-                             for name, pose in zip(('left', 'right'), poses))
-            self.goal_note = (f'球门数据过期（{ages}，允许 '
-                              f'{self.goal_pose_timeout:.1f}s）')
-            return False
         if left.frame != right.frame:
-            self.goal_confirm = 0
             self.goal_note = f'两门坐标系不一致：{left.frame!r} / {right.frame!r}'
-            return False
-        pair = (left.sequence, right.sequence)
-        if pair[0] != self.goal_pair[0] and pair[1] != self.goal_pair[1]:
-            self.goal_confirm += 1
-            self.goal_pair = pair
-        if self.goal_confirm < 3:
-            self.goal_note = '等待两个球门连续三组有效位姿'
             return False
         target, own = (right, left) if self.attack_goal == 'goal_right' else (left, right)
         length = math.hypot(target.x - own.x, target.y - own.y)
@@ -464,10 +465,7 @@ class Soccer(Node):
             self.goal_note = '两门距离过近，检查单位、刚体名或门中心偏移'
             return False
         if self.goal_reference is not None:
-            if any(math.hypot(p.x - ref.x, p.y - ref.y) > 0.10
-                   for p, ref in zip(poses, self.goal_reference)):
-                c.stop('球门位置变化超过 10cm，请重新标定并重启')
-                return False
+            self.goals_locked = True
             return True
         yaw = math.atan2(target.y - own.y, target.x - own.x)
         config = c.cfg._replace(
@@ -483,8 +481,8 @@ class Soccer(Node):
                                      field_max_x=self.field_length/2)
         config.validate()
         c.cfg = config
-        c.wait_for_pose('球门已标定，确认狗与球的定位')
         self.goal_reference = poses
+        self.goals_locked = True
         self.get_logger().info(
             f'球场标定完成：goal_left=({left.x:.3f},{left.y:.3f})，'
             f'goal_right=({right.x:.3f},{right.y:.3f}) 米；进攻 {self.attack_goal}，'
@@ -649,7 +647,6 @@ class Soccer(Node):
                 return
             if not self.armed_once:
                 self.armed_once = True
-                c.wait_for_pose('站稳后重新确认动捕数据')
         if not c.finished and not self.configure_goals(now):
             c.wait_for_pose(self.goal_note)
             self.end_motion()

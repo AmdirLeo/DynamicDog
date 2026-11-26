@@ -30,38 +30,46 @@ LAYERS = (('actor_0', 'mlp_extractor.policy_net.0'),
 def deploy_forward(weights, observation):
     """与 pkg_soccer.rl_control.Actor.__call__ 完全相同的 numpy 前向。"""
     x = np.asarray(observation, dtype=np.float32)
-    for index in (0, 2, 4):
+    indices = sorted(int(key[6:-7]) for key in weights
+                     if key.startswith('actor_') and key.endswith('_weight'))
+    for index in indices:
         x = np.tanh(weights[f'actor_{index}_weight'] @ x +
                     weights[f'actor_{index}_bias'])
     return x
 
 
 def export(model_path, out_path, role='attacker', obs_dim=29, check=True,
-           action_scale=ACTION_SCALE):
+           action_scale=ACTION_SCALE, contact_offset=(0.10, 0.0)):
     from stable_baselines3 import PPO
 
     model = PPO.load(model_path, device='cpu')
     state = model.policy.state_dict()
     weights = {}
-    for index, prefix in enumerate(('mlp_extractor.policy_net.0',
-                                    'mlp_extractor.policy_net.2',
-                                    'action_net')):
-        name = f'actor_{index * 2}'
+    hidden = sorted(int(key.rsplit('.', 2)[1])
+                    for key in state
+                    if key.startswith('mlp_extractor.policy_net.') and
+                    key.endswith('.weight'))
+    prefixes = [('actor_{}'.format(index),
+                 'mlp_extractor.policy_net.{}'.format(index)) for index in hidden]
+    prefixes.append(('actor_{}'.format(hidden[-1] + 2 if hidden else 0), 'action_net'))
+    for name, prefix in prefixes:
         weights[f'{name}_weight'] = state[f'{prefix}.weight'].numpy().astype(np.float32)
         weights[f'{name}_bias'] = state[f'{prefix}.bias'].numpy().astype(np.float32)
     shape = weights['actor_0_weight'].shape
-    if shape != (128, obs_dim):
+    if shape[1] != obs_dim:
         raise SystemExit(f'第一层形状 {shape} 与 obs_dim={obs_dim} 不符')
-    if weights['actor_4_weight'].shape != (3, 128):
-        raise SystemExit('输出层形状应为 (3, 128)')
+    if weights[prefixes[-1][0] + '_weight'].shape[0] != 3:
+        raise SystemExit('输出层第一维应为 3')
 
     payload = dict(weights)
     action_scale = np.asarray(action_scale, np.float32).reshape(3)
+    metadata_role = 'attack' if role == 'attacker' and obs_dim == 41 else role
     if obs_dim != 23:
-        payload.update(role=np.str_(role), action_scale=action_scale,
+        payload.update(role=np.str_(metadata_role), action_scale=action_scale,
                        obs_dim=np.int64(obs_dim),
                        obs_layout=np.str_(LAYOUT_OF[obs_dim]),
-                       field_geometry=FIELD_GEOMETRY)
+                       field_geometry=FIELD_GEOMETRY,
+                       contact_offset=np.asarray(contact_offset, np.float32))
     np.savez(out_path, **payload)
 
     if check:
@@ -76,7 +84,7 @@ def export(model_path, out_path, role='attacker', obs_dim=29, check=True,
                 '导出与 sb3 predict 不一致：检查训练策略类是否在输出端做了 '
                 'tanh（SquashedDiagGaussian），以及 _predict 是否返回 tanh(mean)。')
     print(f'已导出 {out_path}（obs_dim={obs_dim} / {LAYOUT_OF[obs_dim]}，'
-          f'role={role}）')
+          f'role={metadata_role if obs_dim != 23 else role}）')
     return out_path
 
 
@@ -85,7 +93,7 @@ def main(argv=None):
     parser.add_argument('--model', required=True)
     parser.add_argument('--out', required=True)
     parser.add_argument('--role', default='attacker',
-                        choices=('attacker', 'defender', 'stage2'))
+                        choices=('attacker', 'assist', 'defender', 'stage2', 'attack'))
     parser.add_argument('--obs-dim', type=int, default=41, choices=OBS_DIMS)
     parser.add_argument('--speed-scale', type=float, default=1.0,
                         help='速度档位，必须与训练时一致（动作缩放 = '
@@ -97,20 +105,22 @@ def main(argv=None):
     if args.obs_dim == 23 and args.role != 'stage2':
         raise SystemExit('23 维只用于单狗 stage2')
     if args.obs_dim != 23 and args.role == 'stage2':
-        raise SystemExit('29/41 维必须指定 attacker 或 defender')
+        raise SystemExit('29/41 维必须指定 attacker、assist 或 defender')
     scale = np.array([0.45 * args.speed_scale, 0.20 * args.speed_scale, 0.70],
                      np.float32)
+    contact_offset = np.array([0.10, 0.0], np.float32)
     if args.config:
         import json
         with open(args.config, encoding='utf-8') as handle:
             meta = json.load(handle)
         scale = np.asarray(meta['action_scale'], np.float32)
+        contact_offset = np.asarray(meta.get('contact_offset', contact_offset), np.float32)
         print(f'从 {args.config} 读到 action_scale='
               f'{tuple(float(v) for v in scale)}')
     if not 0 < scale[0] <= 1.5 + 1e-6:
         raise SystemExit('前进动作缩放必须在 (0, 1.5] m/s')
     export(args.model, args.out, args.role, args.obs_dim, not args.no_check,
-           scale)
+           scale, contact_offset)
 
 
 if __name__ == '__main__':

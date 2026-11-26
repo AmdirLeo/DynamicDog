@@ -18,7 +18,7 @@ SPEED = 0.30
 SUPPORT_GAP = 1.8        # 支援位在球朝本方门方向的退距
 SUPPORT_LATERAL = 1.1    # 支援位相对球—门连线的横向偏移（靠场地中线一侧）
 DANGER_DISTANCE = 2.6    # 球离本方门多近时，支援位改为直接回追
-ROLES = ('attacker', 'support')
+ROLES = ('attacker', 'support', 'assist')
 
 
 def default_role(index):
@@ -91,6 +91,6 @@ def act(env, index, role=None, speed=SPEED):
     role = role or default_role(index)
     if role not in ROLES:
         raise ValueError(f'未知角色 {role!r}，应为 {ROLES}')
-    if role == 'support':
+    if role in ('support', 'assist'):
         return _support(env, index, speed)
     return _attacker(env, index, speed)

@@ -36,6 +36,8 @@ class Config(NamedTuple):
     goal_width: float = 1.53
     ball_radius: float = 0.12
     pose_timeout: float = 0.5
+    # 允许短时动捕断流：前 0.2 秒等待新帧，随后最多再外推 0.6 秒。
+    prediction_timeout: float = 0.60
     sync_tolerance: float = 0.15
     approach_speed: float = 0.70   # 走位速度（2026-11-17 提速：0.45 → 0.70）
     turn_speed: float = 0.7
@@ -73,14 +75,21 @@ class Config(NamedTuple):
     field_center_x: float = 0.0
     field_center_y: float = 0.0
     field_yaw: float = 0.0
+    # 刚体质心到胸部实际推球点的机身坐标偏移（米）。
+    ball_contact_offset_x: float = 0.0
+    ball_contact_offset_y: float = 0.0
 
     def validate(self):
         """拒绝无效坐标、速度和互相矛盾的几何参数。"""
         if any(not math.isfinite(v) for v in self):
             raise ValueError('参数必须为有限数值')
+        if math.hypot(self.ball_contact_offset_x,
+                      self.ball_contact_offset_y) > 0.35:
+            raise ValueError('ball_contact_offset 不得超过 0.35m')
         signed = {'goal_x', 'goal_y', 'goal_yaw', 'field_min_x',
                   'field_max_x', 'field_min_y', 'field_max_y',
-                  'field_center_x', 'field_center_y', 'field_yaw'}
+                  'field_center_x', 'field_center_y', 'field_yaw',
+                  'ball_contact_offset_x', 'ball_contact_offset_y'}
         if any(v <= 0 for k, v in self._asdict().items() if k not in signed):
             raise ValueError('距离、时间、速度和次数必须为正数')
         if not (self.min_distance < self.kick_distance < self.ball_clearance <
@@ -112,6 +121,8 @@ class Config(NamedTuple):
             raise ValueError('position_tolerance 太大，无法稳定进入球后位置')
         if self.resume_settle_time > self.resume_timeout:
             raise ValueError('resume_settle_time 不能大于 resume_timeout')
+        if self.prediction_timeout <= 0 or self.prediction_timeout > 1.0:
+            raise ValueError('prediction_timeout 必须在 (0,1] 秒')
 
 
 class Pose(NamedTuple):
@@ -167,6 +178,12 @@ class Controller:
         self.turn_sign = None
         self.turn_origin = None
         self.turn_response_until = None
+        self._observed = {'dog': None, 'ball': None}
+        self._velocity = {'dog': (0.0, 0.0, 0.0),
+                         'ball': (0.0, 0.0, 0.0)}
+        self._acceleration = {'dog': (0.0, 0.0, 0.0),
+                              'ball': (0.0, 0.0, 0.0)}
+        self._predicted = set()
 
     @property
     def finished(self):
@@ -301,14 +318,15 @@ class Controller:
         """仅新消息刷新新鲜度；球越过门线且整个球处于门宽内才记进球。"""
         if kind not in ('dog', 'ball'):
             raise ValueError('kind 应为 dog 或 ball')
-        previous = getattr(self, kind)
+        previous = self._observed.get(kind)
         if not all(math.isfinite(v) for v in (x, y, yaw, now, stamp)) or stamp < 0:
             setattr(self, kind, None)
+            self._observed[kind] = None
             self.wait_for_pose('动捕数值无效，停车等待恢复')
             return
         c = self.cfg
         gap = previous is None or now - previous.received > c.pose_timeout
-        if gap:
+        if gap and previous is None:
             self.wait_for_pose('等待连续动捕数据')
         if previous is not None and stamp > 0 and previous.stamp > 0:
             # 部分 VRPN 封装会复用 header.stamp；消息本身仍是新帧，
@@ -317,6 +335,17 @@ class Controller:
                 stamp = previous.stamp
         self.sequence += 1
         pose = Pose(x, y, yaw, now, frame, stamp, self.sequence)
+        if previous is not None and not gap and previous.frame == frame:
+            dt = now - previous.received
+            if dt > 0:
+                old = self._velocity[kind]
+                velocity = ((x-previous.x)/dt, (y-previous.y)/dt,
+                            wrap_angle(yaw-previous.yaw)/dt)
+                self._acceleration[kind] = tuple((velocity[j]-old[j])/dt
+                                                 for j in range(3))
+                self._velocity[kind] = velocity
+        self._observed[kind] = pose
+        self._predicted.discard(kind)
         if kind == 'dog':
             # 只用于判断"裁判是否还在搬狗"；不影响规划。
             self.dog_speed = math.inf
@@ -349,8 +378,34 @@ class Controller:
                         self.scored = True
         setattr(self, kind, pose)
 
+    def _predict_missing(self, now):
+        """Extrapolate brief mocap gaps using the last velocity and acceleration."""
+        prediction_start = min(0.20, self.cfg.pose_timeout)
+        max_age = prediction_start + self.cfg.prediction_timeout
+        for kind, raw in self._observed.items():
+            if raw is None or kind not in self._velocity:
+                continue
+            age = now - raw.received
+            if age <= prediction_start:
+                setattr(self, kind, raw)
+                self._predicted.discard(kind)
+                continue
+            if age > max_age:
+                setattr(self, kind, None)
+                self._predicted.discard(kind)
+                continue
+            vx, vy, wz = self._velocity[kind]
+            ax, ay, aw = self._acceleration[kind]
+            pose = Pose(raw.x + vx*age + .5*ax*age*age,
+                        raw.y + vy*age + .5*ay*age*age,
+                        raw.yaw + wz*age + .5*aw*age*age,
+                        now, raw.frame, raw.stamp, raw.sequence)
+            setattr(self, kind, pose)
+            self._predicted.add(kind)
+
     def poses_valid(self, now):
         """要求同一坐标系且各自接收新鲜，不要求回调同时发生。"""
+        self._predict_missing(now)
         d, b, c = self.dog, self.ball, self.cfg
         return (d is not None and b is not None and bool(d.frame) and
                 d.frame == b.frame and
