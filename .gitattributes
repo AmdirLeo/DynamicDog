@@ -1,0 +1,6 @@
+# 仓库统一换行策略
+# .sh 必须保持 LF：狗上(Ubuntu)直接执行, CRLF 会导致 /usr/bin/env: 'bash\r' 报错
+*.sh text eol=lf
+*.py text eol=lf
+*.xml text eol=lf
+*.md text
