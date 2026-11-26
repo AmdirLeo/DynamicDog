@@ -26,13 +26,16 @@ except Exception:  # pragma: no cover - 训练机没装 ROS 包时走副本
 
 from .obs import (DEAD_STRIP, FIELD_LENGTH, FIELD_WIDTH, GOAL_LINE_X,
                   GOAL_WIDTH, MAX_X, MAX_Y, MIN_X, MIN_Y, OBS_DIM_TEAM,
-                  SERVICE_POINTS, FieldSpec, GOAL_CENTER, make_obs, wrap_angle)
+                  SERVICE_POINTS, FieldSpec, GOAL_CENTER, make_obs, wrap_angle,
+                  body_block)
 
 DT = 0.05
 ACTION_SCALE = np.array([0.45, 0.20, 0.70], np.float32)
 BALL_RADIUS = 0.12
-DOG_RADIUS = 0.16
-CONTACT_DISTANCE = 0.43
+# Use a conservative footprint: the mocap rigid-body center is smaller than
+# the robot's real body, so policies need visible clearance in simulation.
+DOG_RADIUS = 0.22
+CONTACT_DISTANCE = 0.50
 STAGE_DISTANCE = 0.38
 DEADLOCK_DISTANCE = 0.56
 DEADLOCK_TIME = 8.0
@@ -54,13 +57,15 @@ class EnvConfig:
                  reward_goal=10.0, reward_concede=-10.0,
                  reward_dead_ball=-3.0, reward_deadlock=-2.0,
                  reward_contact=0.5, reward_step=-0.005,
-                 reward_collision=-0.03,
+                 reward_collision=-0.22,
+                 reward_proximity=-0.10,
                  reward_half=0.0, reward_possess=0.0, reward_press=0.0,
                  shaping_ball=1.5, shaping_stage=0.8, reward_edge=0.0,
                  reward_aim=0.0, reward_own=0.0, reward_front=0.0,
                  reward_back=0.0,
                  scripted_speed=0.30,
                  obs_dim=OBS_DIM_TEAM, body_dropout=0.05, ablate=(),
+                 contact_offset=(0.10, 0.0),
                  action_scale=ACTION_SCALE, dash=False, dash_speed=1.5,
                  dash_ms=450, dash_cooldown=1.2, dash_trigger=0.80,
                  dash_range=0.90, dash_cone=0.50, dash_goal_cone=0.0,
@@ -106,6 +111,7 @@ class EnvConfig:
         self.reward_contact = float(reward_contact)
         self.reward_step = float(reward_step)
         self.reward_collision = float(reward_collision)
+        self.reward_proximity = float(reward_proximity)
         # 新增三项：半场推进 / 团队控球（两狗等价） / 非持球干扰
         self.reward_half = float(reward_half)
         self.reward_possess = float(reward_possess)
@@ -149,6 +155,9 @@ class EnvConfig:
             raise ValueError('body_dropout 必须在 [0, 1) 内')
         # 队友/次近对手槽位的丢帧概率（模拟动捕断流 → 6 维填 0）
         self.body_dropout = float(body_dropout)
+        self.contact_offset = np.asarray(contact_offset, np.float32).reshape(2)
+        if not np.all(np.isfinite(self.contact_offset)) or np.linalg.norm(self.contact_offset) > 0.35:
+            raise ValueError('contact_offset 必须是长度不超过 0.35m 的有限二维向量')
         # 消融：保持维度不变，只把某些信息抹掉（研究"这 2~6 维值不值得"）
         self.ablate = tuple(ablate if isinstance(ablate, (list, tuple))
                             else (ablate,) if ablate else ())
@@ -243,6 +252,7 @@ class TeamEnv:
         self.obs_delay = 0
         self.prev_phi = None
         self.colliding = False
+        self.collision_teams = np.zeros(2, dtype=bool)
         # 每只狗两个"可选刚体槽位"：[队友, 次近对手] 是否可见（对角逐槽位）
         self.visible = [[True, True] for _ in range(4)]
         # 消融掩码：维度不变，只抹掉指定信息（默认全 1 = 不消融）
@@ -254,7 +264,7 @@ class TeamEnv:
         self.dash_dir = np.zeros((4, 2))
         self.dash_count = 0
         self._fields = {0: FieldSpec(goal_x=ATTACK_GOAL[0][0]),
-                        1: FieldSpec(goal_x=ATTACK_GOAL[1][0])}
+                        1: FieldSpec(goal_x=ATTACK_GOAL[1][0], yaw=math.pi)}
         self.reset()
 
     # ------------------------------------------------------------------ reset
@@ -269,6 +279,9 @@ class TeamEnv:
         self.last_touch = None
         self.stuck_time = 0.0
         self.colliding = False
+        self.collision_teams[:] = False
+        self._phys_prev[:] = False
+        self._phys_now[:] = False
         self.visible = [[True, True] for _ in range(4)]
         self.dash_until[:] = 0.0
         self.dash_ready_at[:] = 0.0
@@ -302,6 +315,8 @@ class TeamEnv:
                 home = HOME[int(TEAM_OF[i])][i % 2]
                 self.pos[i] = self._clip_dog(home + self.rng.normal(0, 0.05, 2))
                 self.yaw[i] = float(self.rng.uniform(-math.pi, math.pi))
+        elif kind == 'timeout':
+            self._kickoff()
         else:
             self.ball = self._random_boundary_restart()
             for i in range(4):
@@ -314,23 +329,27 @@ class TeamEnv:
         """裁判将死区/出界球随机放在原出界点附近的场内位置。
 
         现场发球点是靠近边界的临时位置，不保证落在训练场地的九宫格标记上。
-        保留原球最接近的边界方向，并在 0.08--0.75 m 的内缩距离和切向位置上
-        随机化，避免策略只记住固定发球点。
+        保留原球最接近的边界方向，并在死区内侧随机化，避免策略只记住固定发球点。
+        重发后的球不能仍落在死区，否则下一步会被立即再次判死球。
         """
         x, y = float(self.ball[0]), float(self.ball[1])
         side_gap = min(abs(y - MIN_Y), abs(MAX_Y - y))
         end_gap = min(abs(x - MIN_X), abs(MAX_X - x))
-        inward = float(self.rng.uniform(0.08, 0.75))
+        # DEAD_STRIP 是事件判定的危险条带宽度；再向内留少量余量，确保
+        # 重发球是有效比赛状态而不是“重发后立刻再次死球”。
+        inward = float(self.rng.uniform(DEAD_STRIP + 0.08,
+                                        DEAD_STRIP + 0.85))
         if side_gap <= end_gap:
             side = 1.0 if y >= 0.0 else -1.0
-            rx = float(self.rng.uniform(MIN_X + 0.45, MAX_X - 0.45))
+            rx = float(np.clip(x + self.rng.uniform(-0.75, 0.75),
+                               MIN_X + DEAD_STRIP + 0.08,
+                               MAX_X - DEAD_STRIP - 0.08))
             ry = (MAX_Y - inward) if side > 0 else (MIN_Y + inward)
             return np.array([rx, ry], dtype=float)
         side = 1.0 if x >= 0.0 else -1.0
-        ry = float(self.rng.uniform(GOAL_WIDTH / 2.0 + 0.08,
-                                    MAX_Y - 0.20))
-        if self.rng.random() < 0.5:
-            ry = -ry
+        ry = float(np.clip(y + self.rng.uniform(-0.75, 0.75),
+                           MIN_Y + DEAD_STRIP + 0.08,
+                           MAX_Y - DEAD_STRIP - 0.08))
         rx = (MAX_X - inward) if side > 0 else (MIN_X + inward)
         return np.array([rx, ry], dtype=float)
 
@@ -353,6 +372,9 @@ class TeamEnv:
         self.obs_delay = int(self.rng.integers(c.obs_delay[0], c.obs_delay[1] + 1))
 
     def _prime_tracks(self):
+        # Episode clocks restart at 1s; never regress across two episodes.
+        self.tracks = [Track(3.0) for _ in range(4)]
+        self.ball_track = Track(12.0)
         for k in range(3):
             ts = self.t - (2 - k) * DT
             for i in range(4):
@@ -400,8 +422,11 @@ class TeamEnv:
             self.pos[i] = self._clip_dog(self.pos[i] + DT * world)
         self.colliding = self._dog_collisions()
         for i in range(4):
-            if math.hypot(self.ball[0] - self.pos[i][0],
-                          self.ball[1] - self.pos[i][1]) < CONTACT_DISTANCE:
+            co, si = math.cos(self.yaw[i]), math.sin(self.yaw[i])
+            ox, oy = self.cfg.contact_offset
+            cx = self.pos[i][0] + co * ox - si * oy
+            cy = self.pos[i][1] + si * ox + co * oy
+            if math.hypot(self.ball[0] - cx, self.ball[1] - cy) < CONTACT_DISTANCE:
                 if not self.contact[i]:
                     newly_contact.append(i)
                     self.contact[i] = True
@@ -492,6 +517,7 @@ class TeamEnv:
 
     def _dog_collisions(self):
         colliding = False
+        self.collision_teams[:] = False
         for i in range(4):
             for j in range(i + 1, 4):
                 delta = self.pos[j] - self.pos[i]
@@ -499,6 +525,8 @@ class TeamEnv:
                 if not 1e-6 < distance < 2 * DOG_RADIUS:
                     continue
                 colliding = True
+                self.collision_teams[TEAM_OF[i]] = True
+                self.collision_teams[TEAM_OF[j]] = True
                 normal = delta / distance
                 overlap = 2 * DOG_RADIUS - distance
                 self.pos[i] = self._clip_dog(self.pos[i] - normal * overlap / 2)
@@ -507,13 +535,16 @@ class TeamEnv:
 
     def _ball_collisions(self):
         for i in range(4):
-            delta = self.ball - self.pos[i]
+            co, si = math.cos(self.yaw[i]), math.sin(self.yaw[i])
+            ox, oy = self.cfg.contact_offset
+            contact_center = self.pos[i] + np.array(
+                [co * ox - si * oy, si * ox + co * oy])
+            delta = self.ball - contact_center
             distance = float(np.linalg.norm(delta))
             if not 1e-6 < distance < BALL_RADIUS + DOG_RADIUS:
                 continue
             normal = delta / distance
-            self.ball = self.pos[i] + normal * (BALL_RADIUS + DOG_RADIUS + 1e-4)
-            co, si = math.cos(self.yaw[i]), math.sin(self.yaw[i])
+            self.ball = contact_center + normal * (BALL_RADIUS + DOG_RADIUS + 1e-4)
             world = np.array([co * self.v_body[i][0] - si * self.v_body[i][1],
                               si * self.v_body[i][0] + co * self.v_body[i][1]])
             relative = self.ball_v - world
@@ -598,9 +629,11 @@ class TeamEnv:
                              (goal[1] - self.ball[1]) / norm])
             stage = self.ball - unit * STAGE_DISTANCE
             dogs = np.where(TEAM_OF == team)[0]
-            stage_distance = float(np.mean(
+            # Only one dog needs to approach the ball; the other's role reward
+            # guides it to support, rather than rewarding both for crowding it.
+            stage_distance = float(np.min(
                 [math.hypot(*(self.pos[i] - stage)) for i in dogs]))
-            values.append(self.cfg.shaping_ball * ball_to_goal +
+            values.append(-self.cfg.shaping_ball * ball_to_goal -
                           self.cfg.shaping_stage * stage_distance + edge)
         return np.array(values)
 
@@ -617,7 +650,9 @@ class TeamEnv:
         team_reward = np.full(2, c.reward_step)
         phi = self._team_potentials()
         if self.prev_phi is not None:
-            team_reward += c.gamma_shaping * phi - self.prev_phi
+            # True terminal states have zero potential. Time limits are handled
+            # as truncations by the Gym wrapper and keep their bootstrap value.
+            team_reward += c.gamma_shaping * (0.0 if events else phi) - self.prev_phi
         for i in newly_contact:
             team_reward[int(TEAM_OF[i])] += c.reward_contact
         # 半场推进项：球每深入对方半场 1 m，每步多拿 reward_half*(1/5)*dt；
@@ -675,7 +710,17 @@ class TeamEnv:
             elif kind == 'deadlock':
                 team_reward += self.cfg.reward_deadlock
         if self.colliding:
-            team_reward += self.cfg.reward_collision
+            team_reward[self.collision_teams] += self.cfg.reward_collision
+        # 连续靠得过近时提前给惩罚，避免策略只在发生穿模碰撞的那一帧才学会避让。
+        safe_gap = 2.0 * DOG_RADIUS + 0.18
+        for i in range(4):
+            for j in range(i + 1, 4):
+                if TEAM_OF[i] != TEAM_OF[j]:
+                    continue
+                distance = float(np.linalg.norm(self.pos[i] - self.pos[j]))
+                if distance < safe_gap:
+                    closeness = (safe_gap - distance) / safe_gap
+                    team_reward[int(TEAM_OF[i])] += c.reward_proximity * closeness
         if events:
             self.prev_phi = None
         else:
@@ -716,6 +761,34 @@ class TeamEnv:
     def observations(self):
         return np.stack([self._obs_one(i) for i in range(4)])
 
+    def observation_for_actor(self, i, actor):
+        """Use the checkpoint's input contract for historical opponents/evaluation.
+
+        Shared-policy checkpoints used teammate first and unrotated lateral
+        wall distances for team B. TeamEnv checkpoints use nearest-opponent
+        first. Physics stays fixed when comparing them.
+        """
+        obs = self._obs_one(i)
+        if actor.obs_dim != self.cfg.obs_dim:
+            raise ValueError('模型与环境观测维度不匹配')
+        offset = np.asarray(actor.contact_offset or (0., 0.), np.float32)
+        rel = obs[:2] * 3 + self.cfg.contact_offset - offset
+        obs[:2], obs[18] = rel / 3, np.linalg.norm(rel) / 3
+        if actor.obs_dim == 41 and actor.peer_order == 'teammate_first':
+            x, y, yaw, velocity = self._slot(i)
+            co, si = math.cos(yaw), math.sin(yaw)
+            team = int(TEAM_OF[i])
+            enemies = [j for j in range(4) if int(TEAM_OF[j]) != team]
+            indices = [self.teammate_of(i)] + enemies
+            for k, j in enumerate(indices):
+                slot = self._slot(j)
+                if (k == 0 and not self.visible[i][0] or
+                        k == 2 and not self.visible[i][1]):
+                    slot = None
+                obs[23+6*k:29+6*k] = body_block(slot, x, y, yaw, velocity, co, si)
+            obs[16:18] = ((y-MIN_Y)/6., (MAX_Y-y)/6.)
+        return np.clip(obs, -5., 5.)
+
     def _obs_one(self, i):
         team = int(TEAM_OF[i])
         dog_track = self.tracks[i]
@@ -747,7 +820,8 @@ class TeamEnv:
             opponent=slots[enemies[0]],
             opponent_age=age,
             teammate=teammate, teammate_age=age,
-            opponent2=opponent2, opponent2_age=age)
+            opponent2=opponent2, opponent2_age=age,
+            contact_offset=self.cfg.contact_offset)
         if self.cfg.ablate:
             obs = obs * self.obs_keep + self.obs_fill
         return obs

@@ -31,10 +31,13 @@ src/pkg_soccer/                      ← 包根，名字随便，但里面要有
 │   ├── control.py                   # 状态机基类：场地几何、发球点、暂停/复位
 │   ├── attack.py                    # 进攻规划（rl_policy:=attacker 时才 import）
 │   ├── defense.py                   # ★ 危险区固定防守（rl 主链路 import，必需）
+│   ├── teammate_prediction.py       # 队友位姿预测（regression_velocity 模式，2v2 可选）
 │   ├── stand_guard.py               # 姿态门控（坐/趴/站、故障检测）
 │   ├── measurement.py               # 位姿轨迹与速度估计
 │   ├── record_motion.py             # 位姿录制小工具
-│   ├── policy_2v2_shared_actor.npz  # ★ 部署用策略（41 维，0.45 档）
+│   ├── policy_2v2_shared_actor.npz  # 2v2 旧 shared 权重（41 维，teammate-first，无接触点偏移）
+│   ├── policy_2v2_attack_actor.npz  # ★ CV52 双策略·主攻（41 维，opponent-first，含接触点偏移）
+│   ├── policy_2v2_assist_actor.npz  # ★ CV52 双策略·支援（41 维，opponent-first，含接触点偏移）
 │   ├── policy_duel_*_actor.npz      # 旧 1v1 策略（29 维）
 │   ├── policy_stage2_actor.npz      # 旧单狗策略（23 维）
 │   ├── policy_team_attacker_actor.npz  # 我们训的旧 41 维（槽位顺序不同，见 §6）
@@ -44,6 +47,8 @@ src/pkg_soccer/                      ← 包根，名字随便，但里面要有
 ├── package.xml
 ├── setup.cfg
 ├── setup.py                         # package_data 里必须列上要安装的 .npz
+├── start_match.sh                   # ★ 队友验证过的 CV52 双网络比赛启动器（ attack/assist 权重）
+├── test/test_match_profile.py       # 双网络比赛配置自检（权重哈希/角色/启动器参数）
 ├── train/                           # 训练套件（不安装，留作记录）
 ├── runs/                            # 历史实验权重（不安装）
 └── 训练指南.md
@@ -206,6 +211,40 @@ ros2 topic echo /vrpn/ball/pose --once          # 球刚体有数据
 （`/vrpn/Lizj_dog/pose`），队友的是 `TEAM_A_1`（`/vrpn/xll_dog/pose`）。
 `./start.sh` 不带参数时默认就是 A2。两只狗必须用不同角色、队友话题互指；
 两台机器都跑 A1 会把彼此当对手。
+
+### 2.6 attack/assist 双网络模式（队友验证的 CV52 配置）
+
+在 shared 权重之外，队友训练并实机验证了一对分工网络：
+`policy_2v2_attack_actor.npz`（主攻）+ `policy_2v2_assist_actor.npz`（支援）。
+两套权重的观测布局不同（shared=teammate-first、attack/assist=opponent-first）且带
+胸部接触点偏移标定（0.10 m），部署端会从权重的 `role`/`obs_layout`/`contact_offset`
+**自动适配**，混用不会串槽位。
+
+三种用法：
+
+1. **比赛推荐**：直接用队友验证过的启动器（attack/assist 权重 + 固定比赛参数）：
+
+   ```bash
+   # 用法：start_match.sh A1|A2 对手1话题 对手2话题 [goal_right|goal_left]
+   src/pkg_soccer/start_match.sh A2 /vrpn/zbj_dog/pose /vrpn/lp_dog/pose
+   # A1=xll_dog 初始 attack；A2=Lizj_dog 初始 assist；ENABLE_MOTION=false 只推理
+   ```
+
+2. **用 start.sh 手动启用**：显式指定双模型路径（两者必须同时给，角色校验会拦单边）：
+
+   ```bash
+   RL_ATTACK_MODEL_PATH=src/pkg_soccer/pkg_soccer/policy_2v2_attack_actor.npz \
+   RL_ASSIST_MODEL_PATH=src/pkg_soccer/pkg_soccer/policy_2v2_assist_actor.npz \
+   ./start.sh A2
+   ```
+
+   初始分工默认 A1/B1=attack、A2/B2=assist，`TEAM_ROLE=attack|assist` 可覆盖；
+   `RL_AUTO_ROLE_SWITCH=false` 关闭按站位自动换角色。
+3. **不传模型路径**：退回旧 shared 权重（行为与合并前完全一致）。
+
+配套自检（在 `src/pkg_soccer` 下）：`python3 test/test_match_profile.py`。
+注意：双网络模式默认配套 `rl_teammate_prediction_model=regression_velocity`（仅
+start_match.sh 设置），它要求 2v2 且队友话题有效。
 
 ---
 

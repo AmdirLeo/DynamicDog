@@ -6,14 +6,22 @@ set -euo pipefail
 #   2) 启动：./start.sh A1|A2|B1|B2
 # 角色约定（两人共用一份 setup）：队友始终是 A1（第一个），我始终是 A2（第二个）。
 # 因此本机默认角色是 A2，本狗话题走 TEAM_A_2；不要再用 A1 跑本机。
+# 2v2 初始队内角色：默认 A1/B1=attack、A2/B2=assist；可用 TEAM_ROLE 覆盖。
 ROLE="${1:-A2}"
 ENABLE_MOTION="${ENABLE_MOTION:-false}"
 RL_POLICY="${RL_POLICY:-shared_2v2}"
+TEAM_ROLE="${TEAM_ROLE:-}"
+RL_AUTO_ROLE_SWITCH="${RL_AUTO_ROLE_SWITCH:-true}"
 RL_MODEL_PATH="${RL_MODEL_PATH:-}"
-# 最高速度（m/s）：策略是 0.45 档，默认按此值把动作放大（0.45 × 2.667 = 1.2）。
+RL_ATTACK_MODEL_PATH="${RL_ATTACK_MODEL_PATH:-}"
+RL_ASSIST_MODEL_PATH="${RL_ASSIST_MODEL_PATH:-}"
+# 若实测胸部相对刚体中心有偏差，可按每只狗单独覆盖（单位米）；留空使用权重中的标定值。
+CONTACT_OFFSET_X="${CONTACT_OFFSET_X:-}"
+CONTACT_OFFSET_Y="${CONTACT_OFFSET_Y:-}"
+# 实机比赛速度（m/s）：已实测 1.2 稳定；要复现权重原始动作档用 RL_SPEED_GAIN=1.0。
 RL_SPEED_LIMIT="${RL_SPEED_LIMIT:-1.2}"
-# 0 = 按 RL_SPEED_LIMIT 自动标定；想复现策略原始 0.45 速度就设 1.0
-RL_SPEED_GAIN="${RL_SPEED_GAIN:-0}"
+# 0 = 按 RL_SPEED_LIMIT 自动标定；设 1.0 可复现权重原始动作档。
+RL_SPEED_GAIN="${RL_SPEED_GAIN:-0.0}"
 # 球进死区时仍继续低速走位；设为 false 可恢复等待裁判时停住。
 RL_CONTINUE_DEADZONE="${RL_CONTINUE_DEADZONE:-true}"
 RL_DEADZONE_SPEED_LIMIT="${RL_DEADZONE_SPEED_LIMIT:-0.35}"
@@ -100,6 +108,14 @@ case "$ROLE" in
   *) echo "用法：$0 A1|A2|B1|B2" >&2; exit 2 ;;
 esac
 
+# 默认每队一攻一支援；需要更换初始主攻狗时显式设 TEAM_ROLE=attack/assist。
+if [[ -z "$TEAM_ROLE" ]]; then
+  case "$ROLE" in
+    A1|B1) TEAM_ROLE="attack" ;;
+    A2|B2) TEAM_ROLE="assist" ;;
+  esac
+fi
+
 # 占位话题判定：只认固定的通用哨兵字符串（PLACEHOLDER_*）。
 # DEF_* 里填的真实刚体名（xll_dog/zbj_dog/lp_dog 等）不算占位；
 # 想恢复"未填拦截"效果，把对应 DEF_* 改回哨兵值即可。
@@ -182,6 +198,8 @@ fi
 ARGS=(
   -p control_mode:=rl
   -p rl_policy:="$RL_POLICY"
+  -p team_role:="$TEAM_ROLE"
+  -p rl_auto_role_switch:="$RL_AUTO_ROLE_SWITCH"
   -p dog_pose_topic:="$DOG_TOPIC"
   -p attack_goal:="$GOAL"
   -p rl_speed_limit:="$RL_SPEED_LIMIT"
@@ -202,6 +220,10 @@ if [[ -n "$RL_MODEL_PATH" && ! -f "$RL_MODEL_PATH" ]]; then
 else
   add_opt rl_model_path "$RL_MODEL_PATH"
 fi
+add_opt rl_attack_model_path "$RL_ATTACK_MODEL_PATH"
+add_opt rl_assist_model_path "$RL_ASSIST_MODEL_PATH"
+add_opt ball_contact_offset_x "$CONTACT_OFFSET_X"
+add_opt ball_contact_offset_y "$CONTACT_OFFSET_Y"
 add_opt dog_name "$DOG_NAME"
 add_opt dog_center_offset_x "$DOG_CENTER_OFFSET_X"
 add_opt dog_center_offset_y "$DOG_CENTER_OFFSET_Y"

@@ -99,17 +99,28 @@ class Soccer(Node):
             contact_dist=self.defense_contact_dist)
         self.controller = Controller(Config(**values))
         if self.control_mode == 'rl':
-            from .rl_control import RLController
-            self.controller = RLController(
+            from .teammate_prediction import controller_class
+            self.teammate_prediction_model = self.param(
+                'rl_teammate_prediction_model', 'legacy_acceleration')
+            rl_controller = controller_class(self.teammate_prediction_model)
+            if not team2v2 and self.teammate_prediction_model != 'legacy_acceleration':
+                raise ValueError('队友 regression_velocity 预测仅用于 2v2 RL')
+            self.team_role = self.param('team_role', 'attack')
+            if team2v2 and self.team_role not in ('attack', 'assist'):
+                raise ValueError('2v2 team_role 必须为 attack 或 assist')
+            self.controller = rl_controller(
                 Config(**values), self.param('rl_model_path', ''),
-                float(self.fixed_param('rl_speed_limit', 1.2) if fixed_profile else
-                      self.param('rl_speed_limit', 1.2)), self.rl_policy,
-                # 0 = 自动：满舵前进恰好等于 rl_speed_limit（shared_2v2 的
-                # 0.45 档 → ×2.667 = 1.2 m/s）。转向不放大。
+                float(self.fixed_param('rl_speed_limit', 0.45) if fixed_profile else
+                      self.param('rl_speed_limit', 0.45)), self.rl_policy,
+                # 0 = 自动：满舵前进恰好等于 rl_speed_limit；转向不放大。
                 speed_gain=float(self.param('rl_speed_gain', 0.0)),
                 continue_deadzone=bool(self.param('rl_continue_deadzone', True)),
                 deadzone_speed_limit=float(self.param('rl_deadzone_speed_limit', 0.35)),
-                collision_radius=self.dog_radius, defense_config=defense_config)
+                collision_radius=self.dog_radius, defense_config=defense_config,
+                team_role=self.team_role,
+                attack_model_path=self.param('rl_attack_model_path', ''),
+                assist_model_path=self.param('rl_assist_model_path', ''),
+                auto_role_switch=bool(self.param('rl_auto_role_switch', True)))
         self.enable_motion = self.param('enable_motion', False)
         if type(self.enable_motion) is not bool:
             raise ValueError('enable_motion 必须为 true/false')
@@ -303,6 +314,8 @@ class Soccer(Node):
                 f'RL {self.rl_policy} 已加载（{self.controller.actor.obs_dim} 维）；'
                 f'队友话题={self.teammate_topic if team2v2 else "不使用"}；'
                 f'对手话题={self.opponent_topic if duel else "不使用"}；'
+                f'队内角色={getattr(self.controller, "team_role", "-")}；'
+                f'队友预测={self.teammate_prediction_model}；'
                 f'平移限速={self.controller.speed_limit:.2f}m/s；'
                 'max_kicks 不适用于连续 RL 控制，进球/超时/故障时结束；'
                 f'模式={"实机控制" if self.enable_motion else "只推理、不发运动指令"}')
@@ -384,7 +397,7 @@ class Soccer(Node):
 
     def on_goal(self, name, msg):
         """保存球门刚体原点，同时应用正式运行时的门中心偏移。"""
-        # 球场标定完成后锁定：忽略后续动捕抖动/断流，避免比赛中被重标定打断。
+        # 球门只用于开场一次标定；锁定后忽略后续动捕抖动/断流，比赛中不被重标定打断。
         if self.goals_locked:
             return
         now = time.monotonic()
@@ -474,7 +487,7 @@ class Soccer(Node):
         return True
 
     def configure_goals(self, now):
-        """从两门中心标定球场；标定一次后锁定，运行中不再依赖球门话题。"""
+        """收到两门首帧后标定并锁定球场；运行中不再依赖球门话题。"""
         if not self.use_mocap_goals:
             return True
         c = self.controller
@@ -679,7 +692,6 @@ class Soccer(Node):
                 return
             if not self.armed_once:
                 self.armed_once = True
-                c.wait_for_pose('站稳后重新确认动捕数据')
         if not c.finished and not self.configure_goals(now):
             c.wait_for_pose(self.goal_note)
             self.end_motion()
