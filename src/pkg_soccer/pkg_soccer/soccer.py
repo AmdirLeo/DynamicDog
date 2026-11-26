@@ -72,11 +72,16 @@ class Soccer(Node):
                   for name, default in defaults._asdict().items()}
         self.controller = Controller(Config(**values))
         if self.control_mode == 'rl':
-            from .rl_control import RLController
+            from .teammate_prediction import controller_class
+            self.teammate_prediction_model = self.param(
+                'rl_teammate_prediction_model', 'legacy_acceleration')
+            rl_controller = controller_class(self.teammate_prediction_model)
+            if not team2v2 and self.teammate_prediction_model != 'legacy_acceleration':
+                raise ValueError('队友 regression_velocity 预测仅用于 2v2 RL')
             self.team_role = self.param('team_role', 'attack')
             if team2v2 and self.team_role not in ('attack', 'assist'):
                 raise ValueError('2v2 team_role 必须为 attack 或 assist')
-            self.controller = RLController(
+            self.controller = rl_controller(
                 Config(**values), self.param('rl_model_path', ''),
                 float(self.fixed_param('rl_speed_limit', 0.45) if fixed_profile else
                       self.param('rl_speed_limit', 0.45)), self.rl_policy,
@@ -275,6 +280,7 @@ class Soccer(Node):
                 f'队友话题={self.teammate_topic if team2v2 else "不使用"}；'
                 f'对手话题={self.opponent_topic if duel else "不使用"}；'
                 f'队内角色={getattr(self.controller, "team_role", "-")}；'
+                f'队友预测={self.teammate_prediction_model}；'
                 f'平移限速={self.controller.speed_limit:.2f}m/s；'
                 'max_kicks 不适用于连续 RL 控制，进球/超时/故障时结束；'
                 f'模式={"实机控制" if self.enable_motion else "只推理、不发运动指令"}')

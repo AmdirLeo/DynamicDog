@@ -6,6 +6,7 @@ setup(
     name=package_name,
     version='0.1.0',
     packages=[package_name],
+    scripts=['start_match.sh'],
     package_data={package_name: ['policy_stage2_actor.npz',
                                  'policy_duel_attacker_actor.npz',
                                  'policy_duel_defender_actor.npz',
