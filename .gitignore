@@ -40,3 +40,13 @@ Desktop.ini
 soccer*.csv
 *.pdf
 start.sh
+src/pkg_1106_slam/package.xml
+log/latest_build
+启动命令.md
+log/latest_build
+src/pkg_1106_slam/setup.cfg
+src/pkg_1106_slam/setup.py
+src/pkg_1106_slam/pkg_1106_slam/human_tracking_client.py
+src/pkg_1106_slam/resource/pkg_1106_slam
+src/pkg_1106_slam/pkg_1106_slam/__init__.py
+
