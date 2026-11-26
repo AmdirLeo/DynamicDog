@@ -30,6 +30,7 @@ src/pkg_soccer/                      ← 包根，名字随便，但里面要有
 │   ├── rl_control.py                # 策略加载、41 维观测、速度/短冲、暂停恢复
 │   ├── control.py                   # 状态机基类：场地几何、发球点、暂停/复位
 │   ├── attack.py                    # 进攻规划（rl_policy:=attacker 时才 import）
+│   ├── defense.py                   # ★ 危险区固定防守（rl 主链路 import，必需）
 │   ├── stand_guard.py               # 姿态门控（坐/趴/站、故障检测）
 │   ├── measurement.py               # 位姿轨迹与速度估计
 │   ├── record_motion.py             # 位姿录制小工具
@@ -102,8 +103,12 @@ scp -r _dd/src/pkg_soccer/pkg_soccer _dd/src/pkg_soccer/resource \
        _dd/src/pkg_soccer/setup.cfg mi@<狗IP>:~/lizj/src/pkg_soccer/
 ```
 
-> 老版本里没有 `attack.py` 和 `policy_2v2_shared_actor.npz`，这两个必须带上，
-> 否则 `rl_policy:=shared_2v2` 启动时会 `FileNotFoundError`。
+> 老版本里没有 `defense.py`、`attack.py` 和 `policy_2v2_shared_actor.npz`，
+> 这几个必须带上，否则 `rl_policy:=shared_2v2` 启动时会 `ImportError` /
+> `FileNotFoundError`。`policy_team_attacker_actor.npz` 是旧权重（role/scale
+> 不匹配，加载会被拒绝），**不需要带**。若用 1v1 才需要 `policy_duel_*`；
+> 单狗 `stage2` 才需要 `policy_stage2_actor.npz`——但为了省事通常全部一起传，
+> 总共不到 400 KB。
 
 ### 2.2 编译
 
