@@ -10,7 +10,8 @@ from pkg_soccer.teammate_prediction import VelocityTeammateController
 
 
 class BlockingDefenseTest(unittest.TestCase):
-    def controller(self, angle=0., dog=(-.4, 0.), mate=(-2., 1.)):
+    def controller(self, angle=0., dog=(-.4, 0.), mate=(-2., 1.),
+                   role='defense', auto_phase=False, ball=(.15, 0.)):
         co, si = math.cos(angle), math.sin(angle)
         def rotate(x, y):
             return co*x-si*y, si*x+co*y
@@ -20,11 +21,11 @@ class BlockingDefenseTest(unittest.TestCase):
                      field_max_y=2.75)
         package = Path(__file__).resolve().parents[1] / 'pkg_soccer'
         c = VelocityTeammateController(
-            cfg, policy='shared_2v2', team_role='defense', speed_limit=.45,
+            cfg, policy='shared_2v2', team_role=role, auto_team_phase=auto_phase, speed_limit=.45,
             attack_model_path=str(package / 'policy_2v2_attack_actor.npz'),
             assist_model_path=str(package / 'policy_2v2_assist_actor.npz'))
         for t in (1., 1.05, 1.1):
-            for name, point in (('dog', dog), ('ball', (.15, 0.)),
+            for name, point in (('dog', dog), ('ball', ball),
                                 ('opponent', (0., 0.)), ('opponent2', (2., 1.)),
                                 ('teammate', mate)):
                 x, y = rotate(*point)

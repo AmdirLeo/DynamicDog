@@ -13,6 +13,7 @@ import numpy as np
 from .control import Controller, Pose, wrap_angle
 from .measurement import Track
 from .blocking_defense import BlockingDefense
+from .team_tactics import TeamTactics
 
 
 class Actor:
@@ -91,7 +92,8 @@ class RLController(Controller):
     def __init__(self, config, model_path='', speed_limit=0.30, policy='stage2',
                  speed_gain=1.0, continue_deadzone=True,
                  deadzone_speed_limit=0.35, team_role='attack',
-                 attack_model_path='', assist_model_path='', auto_role_switch=True):
+                 attack_model_path='', assist_model_path='', auto_role_switch=True,
+                 auto_team_phase=False):
         super().__init__(config)
         if policy not in ('stage2', 'attacker', 'defender', 'shared_2v2', 'shared_2v2_large'):
             raise ValueError('rl_policy 必须为 stage2/attacker/defender/shared_2v2/shared_2v2_large')
@@ -102,7 +104,11 @@ class RLController(Controller):
             raise ValueError('2v2 team_role 必须为 attack、assist 或 defense')
         self.team_role = team_role if self.team2v2 else policy
         self.auto_role_switch = bool(auto_role_switch) and team_role != 'defense'
-        self.blocking_defense = BlockingDefense() if self.team2v2 and team_role == 'defense' else None
+        if auto_team_phase and not self.team2v2:
+            raise ValueError('自动全队攻防仅支持 2v2')
+        self.team_tactics = TeamTactics(team_role) if auto_team_phase else None
+        self.defending = self.team2v2 and team_role == 'defense'
+        self.blocking_defense = BlockingDefense() if self.defending or self.team_tactics else None
         if not math.isfinite(speed_limit) or not 0 < speed_limit <= 1.5:
             raise ValueError('rl_speed_limit 必须在 (0, 1.5] m/s（协议 vel_des 上限 1.5）')
         # 策略的动作缩放来自权重（shared_2v2 是 0.45/0.20/0.70）。想要更高的
@@ -329,7 +335,6 @@ class RLController(Controller):
 
     def command(self, now):
         try:
-            self._maybe_switch_team_role(now)
             velocity = super().command(now)
         except (ValueError, FloatingPointError, OverflowError) as exc:
             self.stop('RL 推理失败：' + str(exc))
@@ -451,11 +456,18 @@ class RLController(Controller):
             self.confirmed = 3
         if self.started_at is None:
             self.started_at = now
+        # Decide phases only after current poses and safety gates are valid.
+        if self.team_tactics is not None:
+            self.defending = self.team_tactics.update(self) == 'defense'
+        self._maybe_switch_team_role(now)
         # Training accumulates estimated contact from the previous observation.
         self.distance = math.hypot(b.x-d.x, b.y-d.y)
         self.contact_seen |= self.distance < .43
-        if self.blocking_defense is not None:
-            velocity, reason = self.blocking_defense.command(self)
+        if self.defending:
+            mark = self.team_tactics.mark if self.team_tactics else None
+            velocity, reason = self.blocking_defense.command(self, mark)
+            if self.team_tactics:
+                reason = '全队防守；' + reason
             mode = 'DEFENSE_BLOCK'
         else:
             velocity = self.actor(self.observation(now))*self.effective_scale
@@ -501,7 +513,7 @@ class RLController(Controller):
         cooldown prevents them from swapping every control tick when they are
         briefly side by side.
         """
-        if not (self.team2v2 and self.auto_role_switch and self.teammate and
+        if not (self.team2v2 and not self.defending and self.auto_role_switch and self.teammate and
                 self.dog and self.ball):
             return
         if now - self.role_switch_at < self.role_cooldown:

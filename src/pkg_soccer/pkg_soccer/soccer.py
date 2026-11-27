@@ -92,7 +92,8 @@ class Soccer(Node):
                 team_role=self.team_role,
                 attack_model_path=self.param('rl_attack_model_path', ''),
                 assist_model_path=self.param('rl_assist_model_path', ''),
-                auto_role_switch=bool(self.param('rl_auto_role_switch', True)))
+                auto_role_switch=bool(self.param('rl_auto_role_switch', True)),
+                auto_team_phase=bool(self.param('rl_auto_team_phase', False)))
         self.enable_motion = self.param('enable_motion', False)
         if type(self.enable_motion) is not bool:
             raise ValueError('enable_motion 必须为 true/false')
@@ -285,7 +286,9 @@ class Soccer(Node):
                 'max_kicks 不适用于连续 RL 控制，进球/超时/故障时结束；'
                 f'模式={"实机控制" if self.enable_motion else "只推理、不发运动指令"}')
 
-            if self.controller.blocking_defense is not None:
+            if self.controller.team_tactics is not None:
+                self.get_logger().info('全队自动攻防：对方半场 attack+assist；己方半场双贴身防守；中线切换余量 0.15m')
+            elif self.controller.defending:
                 self.get_logger().info('DEFENSE_BLOCK：固定规则贴身阻挡，绕过 PPO 动作；近身限速 0.18m/s')
 
     def param(self, name, default):
@@ -602,7 +605,7 @@ class Soccer(Node):
             orientation = (f'；dog原始四元数(x,y,z,w)='
                            f'{tuple(round(v, 4) for v in self.dog_quaternion)}'
                            if self.dog_quaternion is not None else '')
-            progress = ('；规则贴身阻挡' if getattr(self.controller, 'blocking_defense', None) is not None else
+            progress = ('；规则贴身阻挡' if getattr(self.controller, 'defending', False) else
                         '；PPO 连续控球' if self.control_mode == 'rl' else
                         f'；射门 {self.controller.kicks}/{self.controller.cfg.max_kicks}')
             self.get_logger().info(

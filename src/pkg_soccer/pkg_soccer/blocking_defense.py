@@ -10,7 +10,7 @@ class BlockingDefense:
     def __init__(self):
         self.target = None
 
-    def command(self, controller):
+    def command(self, controller, target_name=None):
         c = controller
         d, b = c.dog, c.ball
         names = ('opponent', 'opponent2')
@@ -18,7 +18,11 @@ class BlockingDefense:
                                      getattr(c, name).y-b.y) for name in names}
         nearest = min(names, key=lambda name: distances[name])
         # Retain the mark through small tracking/possession fluctuations.
-        if self.target is None or distances[nearest] + .35 < distances[self.target]:
+        if target_name is not None:
+            if target_name not in names:
+                raise ValueError('未知防守目标')
+            self.target = target_name
+        elif self.target is None or distances[nearest] + .35 < distances[self.target]:
             self.target = nearest
         opponent = getattr(c, self.target)
         center = np.array([opponent.x, opponent.y])
