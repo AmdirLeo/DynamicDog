@@ -287,7 +287,7 @@ class Soccer(Node):
                 f'模式={"实机控制" if self.enable_motion else "只推理、不发运动指令"}')
 
             if self.controller.team_tactics is not None:
-                self.get_logger().info('全队自动攻防：对方半场 attack+assist；己方半场双贴身防守；中线切换余量 0.15m')
+                self.get_logger().info('全队自动攻防：中线两侧1米及对方半场 attack+assist；己方距中线超过1米时双贴身防守')
             elif self.controller.defending:
                 self.get_logger().info('DEFENSE_BLOCK：固定规则贴身阻挡，绕过 PPO 动作；近身限速 0.18m/s')
 

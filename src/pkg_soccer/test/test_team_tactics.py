@@ -14,8 +14,8 @@ class TeamTacticsTest(unittest.TestCase):
 
     def test_both_defend_different_opponents_and_keep_attack_roles(self):
         for angle in (0., math.pi/2, -math.pi/2, math.pi):
-            attack = self.controller(angle=angle, ball=(-.3, 0.))
-            assist = self.controller(angle=angle, ball=(-.3, 0.), role='assist',
+            attack = self.controller(angle=angle, ball=(-1.3, 0.))
+            assist = self.controller(angle=angle, ball=(-1.3, 0.), role='assist',
                                      dog=(-2., 1.), mate=(-.4, 0.))
             for c in (attack, assist):
                 c.actor = Mock(side_effect=AssertionError('Defense must bypass PPO'))
@@ -38,24 +38,34 @@ class TeamTacticsTest(unittest.TestCase):
             self.assertEqual(c.state, 'RL')
             c.actor.assert_called_once()
 
-    def test_midfield_hysteresis_and_resume_attack_in_same_controller(self):
-        c = self.controller(ball=(-.3, 0.))
+    def test_one_meter_midfield_resumes_attack_in_same_controller(self):
+        c = self.controller(ball=(-1.3, 0.))
         c.actor = Mock(return_value=np.zeros(3))
         c.command(1.1)
         self.assertTrue(c.defending)
-        for t, bx in ((1.15, -.1), (1.2, .1), (1.25, .3),
-                      (1.3, .1), (1.35, -.1), (1.4, -.3)):
+        for t, bx in ((1.15, -1.1), (1.2, -1.), (1.25, -.8),
+                      (1.3, -.6), (1.35, -.9), (1.4, -1.2)):
             for name in ('dog', 'ball', 'teammate', 'opponent', 'opponent2'):
                 pose = getattr(c, name)
                 c.update(name, bx if name == 'ball' else pose.x, pose.y,
                          pose.yaw, t, 'world', t)
             c.command(t)
-            self.assertEqual(c.defending, t < 1.25 or t >= 1.4)
-        self.assertEqual(c.actor.call_count, 3)
+            self.assertEqual(c.defending, t < 1.2 or t >= 1.4)
+        self.assertEqual(c.actor.call_count, 4)
         self.assertEqual(c.team_role, 'attack')
 
+    def test_entire_midfield_band_attacks_from_defense_in_either_direction(self):
+        for angle in (0., math.pi/2, -math.pi/2, math.pi):
+            for role in ('attack', 'assist'):
+                for bx in (-1., -.5, 0., .5, 1., 2.):
+                    c = self.controller(angle=angle, role=role, ball=(bx, 0.))
+                    c.team_tactics.phase = 'defense'
+                    c.command(1.1)
+                    self.assertFalse(c.defending)
+                    self.assertEqual(c.state, 'RL')
+
     def test_invalid_observations_do_not_change_phase_or_roles(self):
-        c = self.controller(ball=(-.3, 0.))
+        c = self.controller(ball=(-1.3, 0.))
         c.command(1.1)
         c.ball = c.ball._replace(x=2.)
         self.assertEqual(c.command(3.), c.ZERO)

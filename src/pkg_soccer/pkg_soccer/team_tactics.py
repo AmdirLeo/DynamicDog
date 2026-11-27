@@ -16,10 +16,7 @@ class TeamTactics:
 
     def update(self, controller):
         bx, _ = controller.field_coordinates(controller.ball.x, controller.ball.y)
-        if self.phase is None:
-            self.phase = 'attack' if bx >= 0. else 'defense'
-        elif bx < -.15:
-            self.phase = 'defense'
-        elif bx > .15:
-            self.phase = 'attack'
+        # Midfield (including 1 m into our half) always attacks, even after
+        # defense. A stateless threshold also avoids retaining defense at kickoff.
+        self.phase = 'attack' if bx >= -1.0 else 'defense'
         return self.phase
