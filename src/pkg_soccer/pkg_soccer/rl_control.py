@@ -526,8 +526,7 @@ class RLController(Controller):
         velocity[2] = np.clip(velocity[2], -c.turn_speed, c.turn_speed)
         co, si = math.cos(d.yaw), math.sin(d.yaw)
         wx, wy = co*velocity[0]-si*velocity[1], si*velocity[0]+co*velocity[1]
-        if not self.continuous_play and not self.tracking_degraded:
-            # Include observed momentum when checking the next half second.
+
         if self.deadzone_active:
             self.state = 'DEADZONE_MOVE'
             self.reason = ('球在死区，继续低速运动；等待裁判将球放回发球点，'
