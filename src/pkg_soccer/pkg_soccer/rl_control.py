@@ -93,10 +93,12 @@ class RLController(Controller):
                  speed_gain=1.0, continue_deadzone=True,
                  deadzone_speed_limit=0.35, team_role='attack',
                  attack_model_path='', assist_model_path='', auto_role_switch=True,
-                 auto_team_phase=False):
+                 auto_team_phase=False, continuous_play=False, fast_start=False):
         super().__init__(config)
         if policy not in ('stage2', 'attacker', 'defender', 'shared_2v2', 'shared_2v2_large'):
             raise ValueError('rl_policy 必须为 stage2/attacker/defender/shared_2v2/shared_2v2_large')
+        self.continuous_play = bool(continuous_play)
+        self.fast_start = bool(fast_start)
         self.policy = policy
         self.duel = policy != 'stage2'
         self.team2v2 = policy in ('shared_2v2', 'shared_2v2_large')
@@ -170,13 +172,13 @@ class RLController(Controller):
             self.speed_gain = min(max(self.speed_gain, 0.2), 4.0)
         self.effective_scale = np.array(
             [scale[0]*self.speed_gain, scale[1]*self.speed_gain, scale[2]], np.float32)
-        self.tracks = {'dog': Track(3.0, prediction_gap=config.prediction_timeout),
-                       'ball': Track(12.0, prediction_gap=config.prediction_timeout)}
+        self.tracks = {'dog': Track(3.0, prediction_gap=config.prediction_timeout, fast_start=self.fast_start),
+                       'ball': Track(12.0, prediction_gap=config.prediction_timeout, fast_start=self.fast_start)}
         if self.duel:
-            self.tracks['opponent'] = Track(3.0, prediction_gap=config.prediction_timeout)
+            self.tracks['opponent'] = Track(3.0, prediction_gap=config.prediction_timeout, fast_start=self.fast_start)
         if self.team2v2:
-            self.tracks['teammate'] = Track(3.0, prediction_gap=config.prediction_timeout)
-            self.tracks['opponent2'] = Track(3.0, prediction_gap=config.prediction_timeout)
+            self.tracks['teammate'] = Track(3.0, prediction_gap=config.prediction_timeout, fast_start=self.fast_start)
+            self.tracks['opponent2'] = Track(3.0, prediction_gap=config.prediction_timeout, fast_start=self.fast_start)
         for name in self.tracks:
             self._observed.setdefault(name, None)
             self._velocity.setdefault(name, (0.0, 0.0, 0.0))
@@ -335,7 +337,8 @@ class RLController(Controller):
 
     def command(self, now):
         try:
-            velocity = super().command(now)
+            # Continuous play skips turn-progress locks; hardware/pose gates remain.
+            velocity = self._command(now) if self.continuous_play else super().command(now)
         except (ValueError, FloatingPointError, OverflowError) as exc:
             self.stop('RL 推理失败：' + str(exc))
             velocity = self.ZERO
@@ -405,6 +408,8 @@ class RLController(Controller):
             return self.ZERO
         # 进球/球出界/球停门线后都不结束比赛：暂停等裁判把球放回发球点，
         # 球静止在任一发球点且狗也静止后 rearm() 自动继续（规则 4.2/4.4）。
+        if self.paused and self.continuous_play:
+            self.rearm(now, '持续比赛：取消等待裁判发球')
         if self.paused:
             if self._resume_ready(now):
                 self.rearm(now, '球已回到发球点，重新开始比赛')
@@ -413,7 +418,8 @@ class RLController(Controller):
             if self.attack_planner:
                 self.attack_planner.reset()
             return self.ZERO
-        if self.started_at is not None and now-self.started_at >= self.cfg.max_run_time:
+        if (not self.continuous_play and self.started_at is not None and
+                now-self.started_at >= self.cfg.max_run_time):
             self.stop('RL 达到运行时间上限')
             return self.ZERO
         if (not self.poses_valid(now) or
@@ -426,25 +432,28 @@ class RLController(Controller):
             return self.ZERO
         if self.scored:
             self.goals += 1
-            self.pause_play(now, f'进球（本场第 {self.goals} 个），等待裁判发球')
-            return self.ZERO
-        d, b, c = self.dog, self.ball, self.cfg
-        if not self.inside_field(d.x, d.y):
-            self.stop('狗已超出设定场地')
-            return self.ZERO
-        if not self.inside_field(b.x, b.y):
-            self.pause_play(now, '球已出界，等待裁判就近发球')
-            return self.ZERO
-        if self.goal_coordinates(b.x, b.y)[0] >= c.ball_radius:
-            self.pause_play(now, '球在球门线后，等待裁判发球')
-            return self.ZERO
-        if self.duel:
-            bx, _ = self.field_coordinates(b.x, b.y)
-            gx, _ = self.field_coordinates(c.goal_x, c.goal_y)
-            if bx <= -gx-c.ball_radius:
-                self.pause_play(now, '球已越过本方门线，等待裁判发球')
+            self.scored = False
+            if not self.continuous_play:
+                self.pause_play(now, f'进球（本场第 {self.goals} 个），等待裁判发球')
                 return self.ZERO
-        deadzone_wait = self.duel and self.referee_wait(now)
+        d, b, c = self.dog, self.ball, self.cfg
+        if not self.continuous_play:
+            if not self.inside_field(d.x, d.y):
+                self.stop('狗已超出设定场地')
+                return self.ZERO
+            if not self.inside_field(b.x, b.y):
+                self.pause_play(now, '球已出界，等待裁判就近发球')
+                return self.ZERO
+            if self.goal_coordinates(b.x, b.y)[0] >= c.ball_radius:
+                self.pause_play(now, '球在球门线后，等待裁判发球')
+                return self.ZERO
+            if self.duel:
+                bx, _ = self.field_coordinates(b.x, b.y)
+                gx, _ = self.field_coordinates(c.goal_x, c.goal_y)
+                if bx <= -gx-c.ball_radius:
+                    self.pause_play(now, '球已越过本方门线，等待裁判发球')
+                    return self.ZERO
+        deadzone_wait = not self.continuous_play and self.duel and self.referee_wait(now)
         self.deadzone_active = bool(deadzone_wait)
         if deadzone_wait and not self.continue_deadzone:
             if self.attack_planner:
@@ -492,11 +501,12 @@ class RLController(Controller):
         velocity[2] = np.clip(velocity[2], -c.turn_speed, c.turn_speed)
         co, si = math.cos(d.yaw), math.sin(d.yaw)
         wx, wy = co*velocity[0]-si*velocity[1], si*velocity[0]+co*velocity[1]
-        # Include observed momentum when checking the next half second.
-        for vx, vy in ((wx, wy), self.tracks['dog'].velocity[:2]):
-            if not self.inside_field(d.x+float(vx)*.5, d.y+float(vy)*.5):
-                self.stop('RL 预计运动将越过场地边界')
-                return self.ZERO
+        if not self.continuous_play:
+            # Include observed momentum when checking the next half second.
+            for vx, vy in ((wx, wy), self.tracks['dog'].velocity[:2]):
+                if not self.inside_field(d.x+float(vx)*.5, d.y+float(vy)*.5):
+                    self.stop('RL 预计运动将越过场地边界')
+                    return self.ZERO
         if self.deadzone_active:
             self.state = 'DEADZONE_MOVE'
             self.reason = ('球在死区，继续低速运动；等待裁判将球放回发球点，'

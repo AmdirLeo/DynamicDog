@@ -92,12 +92,14 @@ fi
 DOG_NAME="${DOG_NAME#/}"; DOG_NAME="${DOG_NAME%/}"
 echo "T11 | $ROLE=$TEAM_ROLE | dog=$DOG_TOPIC | teammate=$TEAMMATE_TOPIC | 自动换位=$AUTO_ROLE_SWITCH | 全队自动攻防=$AUTO_TEAM_PHASE"
 echo "对手=$OPPONENT_TOPIC,$OPPONENT2_TOPIC | 进攻=$GOAL | 速度=0.45 m/s | 运动=$ENABLE_MOTION | 接口=$DOG_NAME"
+echo "持续比赛=true：比赛事件不停车；硬件故障和定位失效仍停车"
 echo "权重：$ATTACK_MODEL + $ASSIST_MODEL；队友预测=regression_velocity"
 ARGS=(
   -p control_mode:=rl -p rl_policy:=shared_2v2
   -p "team_role:=$TEAM_ROLE" -p "rl_auto_role_switch:=$AUTO_ROLE_SWITCH"
   -p "rl_auto_team_phase:=$AUTO_TEAM_PHASE"
   -p "rl_attack_model_path:=$ATTACK_MODEL" -p "rl_assist_model_path:=$ASSIST_MODEL"
+  -p rl_continuous_play:=true -p rl_fast_start:=true
   -p rl_teammate_prediction_model:=regression_velocity
   -p rl_speed_limit:=0.45 -p rl_speed_gain:=1.0
   -p rl_continue_deadzone:=true -p rl_deadzone_speed_limit:=0.35

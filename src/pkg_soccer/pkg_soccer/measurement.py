@@ -9,7 +9,8 @@ from .control import wrap_angle
 class Track:
     """约 0.1 秒滑窗回归速度，拒绝断流、跳点和跨坐标系差分。"""
 
-    def __init__(self, max_speed, gap=0.20, prediction_gap=0.60):
+    def __init__(self, max_speed, gap=0.20, prediction_gap=0.60, fast_start=False):
+        self.fast_start = bool(fast_start)
         self.max_speed, self.gap = max_speed, gap
         self.prediction_gap = prediction_gap
         self.samples = deque()
@@ -37,8 +38,11 @@ class Track:
                 self.invalidate('gap_or_frame_change')
             elif dt > self.gap:
                 # 保留最后速度，供短时外推；新帧到来后重新建立回归速度。
-                self.samples.clear()
-                self.quality = 'gap'
+                if self.quality == 'bootstrap':
+                    self.invalidate('startup_gap')
+                else:
+                    self.samples.clear()
+                    self.quality = 'gap'
             elif stamp > 0 and previous[1] > 0 and stamp < previous[1]:
                 self.invalidate('source_clock_reset')
             elif math.hypot(x-previous[2], y-previous[3]) > self.max_speed*dt + .03:
@@ -47,6 +51,11 @@ class Track:
         angle = (self.samples[-1][4] + wrap_angle(yaw-self.samples[-1][4])
                  if self.samples else yaw)
         self.samples.append((now, stamp, x, y, angle))
+        if previous is None and self.fast_start and frame:
+            # One initial pose can start control with unknown velocity set to
+            # zero. Regression replaces it within ~0.1 s; never reseed faults.
+            self.velocity = (0.0, 0.0, 0.0)
+            self.basis, self.quality = 'initial_zero', 'bootstrap'
         while len(self.samples) > 2 and now-self.samples[1][0] >= .10:
             self.samples.popleft()
         if len(self.samples) < 3 or now-self.samples[0][0] < .08:
@@ -77,6 +86,9 @@ class Track:
             self.quality = 'ok'
 
     def valid(self, now):
+        if self.quality == 'bootstrap':
+            return (self.latest is not None and self.velocity is not None and
+                    0 <= now-self.latest[0] <= self.gap)
         return (self.latest is not None and self.velocity is not None and
                 self.quality in ('ok', 'gap') and
                 0 <= now-self.latest[0] <= self.gap + self.prediction_gap)

@@ -104,7 +104,7 @@ class MatchProfileTest(unittest.TestCase):
                              'opponent_pose_topic:=/vrpn/rival_one/pose',
                              'opponent2_pose_topic:=/vrpn/rival_two/pose',
                              'rl_teammate_prediction_model:=regression_velocity',
-                             'rl_auto_team_phase:=true',
+                             'rl_auto_team_phase:=true', 'rl_continuous_play:=true', 'rl_fast_start:=true',
                              'rl_speed_limit:=0.45', 'rl_speed_gain:=1.0',
                              'enable_motion:=true', 'dog_name:=robot_test'):
                 self.assertIn(argument, args)

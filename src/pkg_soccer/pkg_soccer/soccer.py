@@ -93,7 +93,9 @@ class Soccer(Node):
                 attack_model_path=self.param('rl_attack_model_path', ''),
                 assist_model_path=self.param('rl_assist_model_path', ''),
                 auto_role_switch=bool(self.param('rl_auto_role_switch', True)),
-                auto_team_phase=bool(self.param('rl_auto_team_phase', False)))
+                auto_team_phase=bool(self.param('rl_auto_team_phase', False)),
+                continuous_play=bool(self.param('rl_continuous_play', False)),
+                fast_start=bool(self.param('rl_fast_start', False)))
         self.enable_motion = self.param('enable_motion', False)
         if type(self.enable_motion) is not bool:
             raise ValueError('enable_motion 必须为 true/false')
@@ -129,7 +131,9 @@ class Soccer(Node):
         if self.walk_motion_id not in (303, 305):
             raise ValueError('walk_motion_id 只支持 303（慢速）或 305（快速）')
         self.stand_guard = StandGuard(self.walk_motion_id, self.posture_timeout,
-                                      self.stand_timeout)
+                                      self.stand_timeout,
+                                      recover_status_timeout=getattr(self.controller, 'continuous_play', False),
+                                      fast_start=getattr(self.controller, 'fast_start', False))
         self.stand_client = None
         self.stand_future = None
         self.use_mocap_goals = self.param('use_mocap_goals', True)
@@ -286,6 +290,10 @@ class Soccer(Node):
                 'max_kicks 不适用于连续 RL 控制，进球/超时/故障时结束；'
                 f'模式={"实机控制" if self.enable_motion else "只推理、不发运动指令"}')
 
+            if self.controller.fast_start:
+                self.get_logger().info('快速启动：正常姿态首帧放行，首帧定位先以零速度估计启动，再切回滑窗测速')
+            if self.controller.continuous_play:
+                self.get_logger().info('持续比赛已开启：取消进球/越界/裁判复位/运行超时/转向反馈停车；保留定位与硬件故障停车')
             if self.controller.team_tactics is not None:
                 self.get_logger().info('全队自动攻防：中线两侧1米及对方半场 attack+assist；己方距中线超过1米时双贴身防守')
             elif self.controller.defending:
