@@ -97,7 +97,7 @@ echo "权重：$ATTACK_MODEL + $ASSIST_MODEL；队友预测=regression_velocity"
 ARGS=(
   -p control_mode:=rl -p rl_policy:=shared_2v2
   -p "team_role:=$TEAM_ROLE" -p "rl_auto_role_switch:=$AUTO_ROLE_SWITCH"
-  -p "rl_auto_team_phase:=$AUTO_TEAM_PHASE"
+  -p "rl_auto_team_phase:=$AUTO_TEAM_PHASE" -p rl_kickoff_attack_seconds:=5.0
   -p "rl_attack_model_path:=$ATTACK_MODEL" -p "rl_assist_model_path:=$ASSIST_MODEL"
   -p rl_continuous_play:=true -p rl_fast_start:=true -p rl_tracking_fallback:=true
   -p rl_teammate_prediction_model:=regression_velocity

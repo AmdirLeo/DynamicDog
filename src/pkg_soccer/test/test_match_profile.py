@@ -107,6 +107,7 @@ class MatchProfileTest(unittest.TestCase):
                              'rl_auto_team_phase:=true', 'rl_continuous_play:=true', 'rl_fast_start:=true',
                              'rl_speed_limit:=' + ('0.60' if role == 'A1' else '0.45'),
                              'rl_speed_gain:=0.0', 'rl_tracking_fallback:=true',
+                             'rl_kickoff_attack_seconds:=5.0',
                              'enable_motion:=true', 'dog_name:=robot_test'):
                 self.assertIn(argument, args)
             for model_role in ('attack', 'assist'):

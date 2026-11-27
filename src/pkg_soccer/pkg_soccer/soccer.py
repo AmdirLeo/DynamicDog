@@ -95,7 +95,8 @@ class Soccer(Node):
                 auto_team_phase=bool(self.param('rl_auto_team_phase', False)),
                 continuous_play=bool(self.param('rl_continuous_play', False)),
                 fast_start=bool(self.param('rl_fast_start', False)),
-                allow_tracking_fallback=bool(self.param('rl_tracking_fallback', False)))
+                allow_tracking_fallback=bool(self.param('rl_tracking_fallback', False)),
+                kickoff_attack_seconds=float(self.param('rl_kickoff_attack_seconds', 5.0)))
         self.enable_motion = self.param('enable_motion', False)
         if type(self.enable_motion) is not bool:
             raise ValueError('enable_motion 必须为 true/false')
@@ -297,6 +298,8 @@ class Soccer(Node):
             if self.controller.continuous_play:
                 self.get_logger().info('持续比赛已开启：取消进球/越界/裁判复位/运行超时/转向反馈停车；保留定位与硬件故障停车')
             if self.controller.team_tactics is not None:
+                self.get_logger().info('开场强制进攻 {:.1f}s，保留初始 attack/assist 分工'.format(
+                    self.controller.team_tactics.kickoff_seconds))
                 self.get_logger().info('全队自动攻防：中线两侧1米及对方半场 attack+assist；己方距中线超过1米时双贴身防守')
             elif self.controller.defending:
                 self.get_logger().info('DEFENSE_BLOCK：固定规则贴身阻挡，绕过 PPO 动作；近身限速 0.18m/s')

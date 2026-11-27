@@ -95,7 +95,7 @@ class RLController(Controller):
                  deadzone_speed_limit=0.35, team_role='attack',
                  attack_model_path='', assist_model_path='', auto_role_switch=True,
                  auto_team_phase=False, continuous_play=False, fast_start=False,
-                 allow_tracking_fallback=False):
+                 allow_tracking_fallback=False, kickoff_attack_seconds=0.0):
         super().__init__(config)
         if policy not in ('stage2', 'attacker', 'defender', 'shared_2v2', 'shared_2v2_large'):
             raise ValueError('rl_policy 必须为 stage2/attacker/defender/shared_2v2/shared_2v2_large')
@@ -114,7 +114,7 @@ class RLController(Controller):
         self.auto_role_switch = bool(auto_role_switch) and team_role != 'defense'
         if auto_team_phase and not self.team2v2:
             raise ValueError('自动全队攻防仅支持 2v2')
-        self.team_tactics = TeamTactics(team_role) if auto_team_phase else None
+        self.team_tactics = TeamTactics(team_role, kickoff_attack_seconds) if auto_team_phase else None
         self.defending = self.team2v2 and team_role == 'defense'
         self.blocking_defense = BlockingDefense() if self.defending or self.team_tactics else None
         if not math.isfinite(speed_limit) or not 0 < speed_limit <= 1.5:
@@ -484,7 +484,7 @@ class RLController(Controller):
             self.started_at = now
         # Decide phases only after current poses and safety gates are valid.
         if self.team_tactics is not None:
-            self.defending = self.team_tactics.update(self) == 'defense'
+            self.defending = self.team_tactics.update(self, now) == 'defense'
         self._maybe_switch_team_role(now)
         # Training accumulates estimated contact from the previous observation.
         self.distance = math.hypot(b.x-d.x, b.y-d.y)
@@ -509,6 +509,9 @@ class RLController(Controller):
                 velocity = np.asarray(override, dtype=np.float32)
             mode, reason = self.attack_planner.state, self.attack_planner.reason
             velocity = self.attack_planner.limit_contact(self, velocity)
+        if self.team_tactics and self.team_tactics.kickoff_active(now):
+            remaining = self.team_tactics.kickoff_seconds - (now-self.team_tactics.kickoff_started_at)
+            reason = '开场强制进攻 {}（剩余 {:.1f}s）；'.format(self.team_role, remaining) + reason
         # Rules and RL share the same body-axis envelope and total speed cap.
         velocity = np.asarray(velocity, dtype=np.float32)
         axis_ratio = max(1., abs(velocity[0])/self.effective_scale[0],
@@ -550,6 +553,8 @@ class RLController(Controller):
         """
         if not (self.team2v2 and not self.defending and not self.tracking_degraded and self.auto_role_switch and self.teammate and
                 self.dog and self.ball):
+            return
+        if self.team_tactics and self.team_tactics.kickoff_active(now):
             return
         if now - self.role_switch_at < self.role_cooldown:
             return

@@ -83,6 +83,60 @@ class TeamTacticsTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.controller(role='defense')
 
+    def refresh(self, c, now):
+        for t in (now-.1, now-.05, now):
+            for name in c.tracks:
+                pose = c._observed[name]
+                c.update(name, pose.x, pose.y, pose.yaw, t, pose.frame, t)
+
+    def test_kickoff_forces_complementary_attack_then_returns_to_dual_defense(self):
+        for role in ('attack', 'assist'):
+            c = self.controller(role=role, kickoff=5., ball=(-1.3, 0.))
+            c.actor = Mock(return_value=np.zeros(3))
+            c.command(1.1)
+            self.assertFalse(c.defending)
+            self.assertEqual(c.team_role, role)
+            self.assertIn('开场强制进攻', c.reason)
+            self.refresh(c, 5.9)
+            c.command(5.9)
+            self.assertFalse(c.defending)
+            self.assertEqual(c.team_role, role)
+            self.refresh(c, 6.2)
+            c.command(6.2)
+            self.assertTrue(c.defending)
+            self.assertEqual(c.state, 'DEFENSE_BLOCK')
+
+    def test_kickoff_does_not_expire_waiting_for_initial_data_or_repeat_on_rearm(self):
+        c = self.controller(kickoff=5., ball=(-1.3, 0.))
+        c.command(10.)
+        self.assertEqual(c.state, 'WAIT_POSE')
+        self.assertIsNone(c.team_tactics.kickoff_started_at)
+        self.refresh(c, 20.)
+        c.command(20.)
+        self.assertFalse(c.defending)
+        self.assertEqual(c.team_tactics.kickoff_started_at, 20.)
+        c.rearm(30., 'restart')
+        self.refresh(c, 30.)
+        c.command(30.)
+        self.assertTrue(c.defending)
+        self.assertEqual(c.team_tactics.kickoff_started_at, 20.)
+
+    def test_kickoff_blocks_early_role_swap_even_with_bad_attacker_position(self):
+        c = self.controller(kickoff=5., continuous=True, ball=(0., 0.),
+                            dog=(2., 0.), mate=(-.7, 0.))
+        c.command(1.1)
+        self.refresh(c, 5.9)
+        c.command(5.9)
+        self.assertEqual(c.team_role, 'attack')
+        self.refresh(c, 6.2)
+        c.command(6.2)
+        self.assertEqual(c.team_role, 'assist')
+
+    def test_kickoff_rejects_invalid_durations(self):
+        for duration in (-1., float('nan'), float('inf'), 61.):
+            with self.assertRaises(ValueError):
+                self.controller(kickoff=duration)
+
 
 if __name__ == '__main__':
     unittest.main()
