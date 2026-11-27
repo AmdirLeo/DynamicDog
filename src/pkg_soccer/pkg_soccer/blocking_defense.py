@@ -13,17 +13,21 @@ class BlockingDefense:
     def command(self, controller, target_name=None):
         c = controller
         d, b = c.dog, c.ball
-        names = ('opponent', 'opponent2')
-        distances = {name: math.hypot(getattr(c, name).x-b.x,
-                                     getattr(c, name).y-b.y) for name in names}
-        nearest = min(names, key=lambda name: distances[name])
-        # Retain the mark through small tracking/possession fluctuations.
+        names = [name for name in ('opponent', 'opponent2')
+                 if getattr(c, name, None) is not None and
+                 getattr(c, name).frame == d.frame]
         if target_name is not None:
             if target_name not in names:
-                raise ValueError('未知防守目标')
+                raise ValueError('防守目标不可用')
             self.target = target_name
-        elif self.target is None or distances[nearest] + .35 < distances[self.target]:
-            self.target = nearest
+        else:
+            distances = {name: math.hypot(getattr(c, name).x-b.x,
+                                         getattr(c, name).y-b.y) for name in names}
+            if not names:
+                raise ValueError('没有有效防守目标')
+            nearest = min(names, key=lambda name: distances[name])
+            if self.target not in names or distances[nearest]+.35 < distances[self.target]:
+                self.target = nearest
         opponent = getattr(c, self.target)
         center = np.array([opponent.x, opponent.y])
         own_goal = np.array([2*c.cfg.field_center_x-c.cfg.goal_x,
@@ -32,7 +36,9 @@ class BlockingDefense:
         length = float(np.linalg.norm(delta))
         unit = delta/length if length > 1e-6 else np.array(
             [-math.cos(c.cfg.field_yaw), -math.sin(c.cfg.field_yaw)])
-        target = center + .40*unit + .25*np.asarray(c.tracks[self.target].velocity[:2])
+        measured_velocity = c.tracks[self.target].velocity
+        velocity = measured_velocity[:2] if measured_velocity is not None else (0., 0.)
+        target = center + .40*unit + .25*np.asarray(velocity)
         position = np.array([d.x, d.y])
         gap = position-center
         longitudinal = float(gap @ unit)
@@ -57,7 +63,9 @@ class BlockingDefense:
         if speed > cap:
             world *= cap/speed
         # Do not deliberately squeeze our own attacker at close range.
-        mate_delta = np.array([c.teammate.x, c.teammate.y])-position
+        mate_delta = (np.array([c.teammate.x, c.teammate.y])-position
+                      if c.teammate is not None and c.teammate.frame == d.frame
+                      else np.zeros(2))
         mate_gap = float(np.linalg.norm(mate_delta))
         if 1e-6 < mate_gap < .65:
             toward = mate_delta/mate_gap

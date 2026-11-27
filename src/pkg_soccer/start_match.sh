@@ -18,8 +18,8 @@ DOG_NAME="${DOG_NAME:-}"
 TEAM_A_1="${TEAM_A_1:-/vrpn/xll_dog/pose}"
 TEAM_A_2="${TEAM_A_2:-/vrpn/Lizj_dog/pose}"
 case "$ROLE" in
-  A1) DOG_TOPIC="$TEAM_A_1"; TEAMMATE_TOPIC="$TEAM_A_2"; DEFAULT_ROLE=attack ;;
-  A2) DOG_TOPIC="$TEAM_A_2"; TEAMMATE_TOPIC="$TEAM_A_1"; DEFAULT_ROLE=assist ;;
+  A1) DOG_TOPIC="$TEAM_A_1"; TEAMMATE_TOPIC="$TEAM_A_2"; DEFAULT_ROLE=attack; SPEED_LIMIT=0.60 ;;
+  A2) DOG_TOPIC="$TEAM_A_2"; TEAMMATE_TOPIC="$TEAM_A_1"; DEFAULT_ROLE=assist; SPEED_LIMIT=0.45 ;;
   *) usage; exit 2 ;;
 esac
 # 默认自动攻防；显式 TEAM_ROLE 保留上一版的固定角色用法。
@@ -91,7 +91,7 @@ if [[ -z "$DOG_NAME" && "$ENABLE_MOTION" == true ]]; then
 fi
 DOG_NAME="${DOG_NAME#/}"; DOG_NAME="${DOG_NAME%/}"
 echo "T11 | $ROLE=$TEAM_ROLE | dog=$DOG_TOPIC | teammate=$TEAMMATE_TOPIC | 自动换位=$AUTO_ROLE_SWITCH | 全队自动攻防=$AUTO_TEAM_PHASE"
-echo "对手=$OPPONENT_TOPIC,$OPPONENT2_TOPIC | 进攻=$GOAL | 速度=0.45 m/s | 运动=$ENABLE_MOTION | 接口=$DOG_NAME"
+echo "对手=$OPPONENT_TOPIC,$OPPONENT2_TOPIC | 进攻=$GOAL | 速度=$SPEED_LIMIT m/s | 运动=$ENABLE_MOTION | 接口=$DOG_NAME"
 echo "持续比赛=true：比赛事件不停车；硬件故障和定位失效仍停车"
 echo "权重：$ATTACK_MODEL + $ASSIST_MODEL；队友预测=regression_velocity"
 ARGS=(
@@ -99,9 +99,9 @@ ARGS=(
   -p "team_role:=$TEAM_ROLE" -p "rl_auto_role_switch:=$AUTO_ROLE_SWITCH"
   -p "rl_auto_team_phase:=$AUTO_TEAM_PHASE"
   -p "rl_attack_model_path:=$ATTACK_MODEL" -p "rl_assist_model_path:=$ASSIST_MODEL"
-  -p rl_continuous_play:=true -p rl_fast_start:=true
+  -p rl_continuous_play:=true -p rl_fast_start:=true -p rl_tracking_fallback:=true
   -p rl_teammate_prediction_model:=regression_velocity
-  -p rl_speed_limit:=0.45 -p rl_speed_gain:=1.0
+  -p "rl_speed_limit:=$SPEED_LIMIT" -p rl_speed_gain:=0.0
   -p rl_continue_deadzone:=true -p rl_deadzone_speed_limit:=0.35
   -p "dog_pose_topic:=$DOG_TOPIC" -p "teammate_pose_topic:=$TEAMMATE_TOPIC"
   -p "opponent_pose_topic:=$OPPONENT_TOPIC" -p "opponent2_pose_topic:=$OPPONENT2_TOPIC"

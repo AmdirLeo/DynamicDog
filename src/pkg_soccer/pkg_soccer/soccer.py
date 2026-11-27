@@ -83,8 +83,7 @@ class Soccer(Node):
                 raise ValueError('2v2 team_role 必须为 attack、assist 或 defense')
             self.controller = rl_controller(
                 Config(**values), self.param('rl_model_path', ''),
-                float(self.fixed_param('rl_speed_limit', 0.45) if fixed_profile else
-                      self.param('rl_speed_limit', 0.45)), self.rl_policy,
+                float(self.param('rl_speed_limit', 0.45)), self.rl_policy,
                 # 0 = 自动：满舵前进恰好等于 rl_speed_limit；转向不放大。
                 speed_gain=float(self.param('rl_speed_gain', 0.0)),
                 continue_deadzone=bool(self.param('rl_continue_deadzone', True)),
@@ -95,7 +94,8 @@ class Soccer(Node):
                 auto_role_switch=bool(self.param('rl_auto_role_switch', True)),
                 auto_team_phase=bool(self.param('rl_auto_team_phase', False)),
                 continuous_play=bool(self.param('rl_continuous_play', False)),
-                fast_start=bool(self.param('rl_fast_start', False)))
+                fast_start=bool(self.param('rl_fast_start', False)),
+                allow_tracking_fallback=bool(self.param('rl_tracking_fallback', False)))
         self.enable_motion = self.param('enable_motion', False)
         if type(self.enable_motion) is not bool:
             raise ValueError('enable_motion 必须为 true/false')
@@ -290,6 +290,8 @@ class Soccer(Node):
                 'max_kicks 不适用于连续 RL 控制，进球/超时/故障时结束；'
                 f'模式={"实机控制" if self.enable_motion else "只推理、不发运动指令"}')
 
+            if self.controller.allow_tracking_fallback:
+                self.get_logger().info('取消全通道定位/测速等待：数据不齐时低速规则控制（0.20m/s），恢复后自动使用 PPO')
             if self.controller.fast_start:
                 self.get_logger().info('快速启动：正常姿态首帧放行，首帧定位先以零速度估计启动，再切回滑窗测速')
             if self.controller.continuous_play:

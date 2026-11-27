@@ -14,6 +14,7 @@ from .control import Controller, Pose, wrap_angle
 from .measurement import Track
 from .blocking_defense import BlockingDefense
 from .team_tactics import TeamTactics
+from . import tracking_fallback
 
 
 class Actor:
@@ -93,15 +94,20 @@ class RLController(Controller):
                  speed_gain=1.0, continue_deadzone=True,
                  deadzone_speed_limit=0.35, team_role='attack',
                  attack_model_path='', assist_model_path='', auto_role_switch=True,
-                 auto_team_phase=False, continuous_play=False, fast_start=False):
+                 auto_team_phase=False, continuous_play=False, fast_start=False,
+                 allow_tracking_fallback=False):
         super().__init__(config)
         if policy not in ('stage2', 'attacker', 'defender', 'shared_2v2', 'shared_2v2_large'):
             raise ValueError('rl_policy 必须为 stage2/attacker/defender/shared_2v2/shared_2v2_large')
         self.continuous_play = bool(continuous_play)
         self.fast_start = bool(fast_start)
+        self.allow_tracking_fallback = bool(allow_tracking_fallback)
+        self.tracking_degraded = []
         self.policy = policy
         self.duel = policy != 'stage2'
         self.team2v2 = policy in ('shared_2v2', 'shared_2v2_large')
+        if self.allow_tracking_fallback and not self.team2v2:
+            raise ValueError('定位降级控制仅支持 2v2')
         if self.team2v2 and team_role not in ('attack', 'assist', 'defense'):
             raise ValueError('2v2 team_role 必须为 attack、assist 或 defense')
         self.team_role = team_role if self.team2v2 else policy
@@ -422,10 +428,20 @@ class RLController(Controller):
                 now-self.started_at >= self.cfg.max_run_time):
             self.stop('RL 达到运行时间上限')
             return self.ZERO
-        if (not self.poses_valid(now) or
-                not all(track.valid(now) for track in self.tracks.values())):
-            missing = [name for name, track in self.tracks.items() if not track.valid(now)]
-            self.wait_for_pose('RL 等待同坐标系连续有效位姿、速度：' + ', '.join(missing))
+        if self.allow_tracking_fallback:
+            # Only the core dog/ball pair is required to keep moving. Do not
+            # call PPO with absent peers or an unavailable velocity estimate.
+            core_valid = Controller.poses_valid(self, now)
+            self.tracking_degraded = tracking_fallback.issues(self, now)
+            ready = core_valid
+            wait_reason = tracking_fallback.core_reason(self, now)
+        else:
+            ready = self.poses_valid(now) and all(t.valid(now) for t in self.tracks.values())
+            self.tracking_degraded = []
+            missing = tracking_fallback.issues(self, now)
+            wait_reason = '等待有效定位/测速：' + ', '.join(missing)
+        if not ready:
+            self.wait_for_pose(wait_reason)
             self.deadlock_since = None
             if self.attack_planner:
                 self.attack_planner.reset()
@@ -453,7 +469,8 @@ class RLController(Controller):
                 if bx <= -gx-c.ball_radius:
                     self.pause_play(now, '球已越过本方门线，等待裁判发球')
                     return self.ZERO
-        deadzone_wait = not self.continuous_play and self.duel and self.referee_wait(now)
+        deadzone_wait = (not self.continuous_play and not self.tracking_degraded and
+                         self.duel and self.referee_wait(now))
         self.deadzone_active = bool(deadzone_wait)
         if deadzone_wait and not self.continue_deadzone:
             if self.attack_planner:
@@ -472,7 +489,11 @@ class RLController(Controller):
         # Training accumulates estimated contact from the previous observation.
         self.distance = math.hypot(b.x-d.x, b.y-d.y)
         self.contact_seen |= self.distance < .43
-        if self.defending:
+        if self.tracking_degraded:
+            velocity, reason = tracking_fallback.command(self, now)
+            reason += '；不可用通道=' + ', '.join(self.tracking_degraded)
+            mode = 'TRACKING_FALLBACK'
+        elif self.defending:
             mark = self.team_tactics.mark if self.team_tactics else None
             velocity, reason = self.blocking_defense.command(self, mark)
             if self.team_tactics:
@@ -496,12 +517,16 @@ class RLController(Controller):
         speed = float(np.linalg.norm(velocity[:2]))
         if speed > self.speed_limit:
             velocity[:2] *= self.speed_limit/speed
+            speed = self.speed_limit
+        if self.tracking_degraded and speed > .20:
+            velocity[:2] *= .20/speed
+            speed = .20
         if self.deadzone_active and speed > self.deadzone_speed_limit:
             velocity[:2] *= self.deadzone_speed_limit/max(speed, 1e-9)
         velocity[2] = np.clip(velocity[2], -c.turn_speed, c.turn_speed)
         co, si = math.cos(d.yaw), math.sin(d.yaw)
         wx, wy = co*velocity[0]-si*velocity[1], si*velocity[0]+co*velocity[1]
-        if not self.continuous_play:
+        if not self.continuous_play and not self.tracking_degraded:
             # Include observed momentum when checking the next half second.
             for vx, vy in ((wx, wy), self.tracks['dog'].velocity[:2]):
                 if not self.inside_field(d.x+float(vx)*.5, d.y+float(vy)*.5):
@@ -523,7 +548,7 @@ class RLController(Controller):
         cooldown prevents them from swapping every control tick when they are
         briefly side by side.
         """
-        if not (self.team2v2 and not self.defending and self.auto_role_switch and self.teammate and
+        if not (self.team2v2 and not self.defending and not self.tracking_degraded and self.auto_role_switch and self.teammate and
                 self.dog and self.ball):
             return
         if now - self.role_switch_at < self.role_cooldown:
