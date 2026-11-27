@@ -79,8 +79,8 @@ class Soccer(Node):
             if not team2v2 and self.teammate_prediction_model != 'legacy_acceleration':
                 raise ValueError('队友 regression_velocity 预测仅用于 2v2 RL')
             self.team_role = self.param('team_role', 'attack')
-            if team2v2 and self.team_role not in ('attack', 'assist'):
-                raise ValueError('2v2 team_role 必须为 attack 或 assist')
+            if team2v2 and self.team_role not in ('attack', 'assist', 'defense'):
+                raise ValueError('2v2 team_role 必须为 attack、assist 或 defense')
             self.controller = rl_controller(
                 Config(**values), self.param('rl_model_path', ''),
                 float(self.fixed_param('rl_speed_limit', 0.45) if fixed_profile else
@@ -284,6 +284,9 @@ class Soccer(Node):
                 f'平移限速={self.controller.speed_limit:.2f}m/s；'
                 'max_kicks 不适用于连续 RL 控制，进球/超时/故障时结束；'
                 f'模式={"实机控制" if self.enable_motion else "只推理、不发运动指令"}')
+
+            if self.controller.blocking_defense is not None:
+                self.get_logger().info('DEFENSE_BLOCK：固定规则贴身阻挡，绕过 PPO 动作；近身限速 0.18m/s')
 
     def param(self, name, default):
         """启动参数只读，避免运行时变更却未实际应用。"""
@@ -599,7 +602,8 @@ class Soccer(Node):
             orientation = (f'；dog原始四元数(x,y,z,w)='
                            f'{tuple(round(v, 4) for v in self.dog_quaternion)}'
                            if self.dog_quaternion is not None else '')
-            progress = ('；PPO 连续控球' if self.control_mode == 'rl' else
+            progress = ('；规则贴身阻挡' if getattr(self.controller, 'blocking_defense', None) is not None else
+                        '；PPO 连续控球' if self.control_mode == 'rl' else
                         f'；射门 {self.controller.kicks}/{self.controller.cfg.max_kicks}')
             self.get_logger().info(
                 f'{state}: {reason}；{positions}{progress}；速度=({velocity[0]:.2f},'

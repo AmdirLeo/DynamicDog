@@ -5,6 +5,7 @@ set -eo pipefail
 usage() {
   echo "用法：$0 A1|A2 /vrpn/对手1/pose /vrpn/对手2/pose [goal_right|goal_left]" >&2
   echo "A1=xll_dog，初始 attack；A2=Lizj_dog，初始 assist。默认开运动，ENABLE_MOTION=false 只推理。" >&2
+  echo "TEAM_ROLE=attack|assist|defense 可固定角色；defense 为持续贴身阻挡。" >&2
   echo "可用 DOG_NAME 指定本机运动命名空间，A_WS 指定工作区。" >&2
 }
 if [[ $# -lt 3 || $# -gt 4 ]]; then usage; exit 2; fi
@@ -17,9 +18,17 @@ DOG_NAME="${DOG_NAME:-}"
 TEAM_A_1="${TEAM_A_1:-/vrpn/xll_dog/pose}"
 TEAM_A_2="${TEAM_A_2:-/vrpn/Lizj_dog/pose}"
 case "$ROLE" in
-  A1) DOG_TOPIC="$TEAM_A_1"; TEAMMATE_TOPIC="$TEAM_A_2"; TEAM_ROLE=attack ;;
-  A2) DOG_TOPIC="$TEAM_A_2"; TEAMMATE_TOPIC="$TEAM_A_1"; TEAM_ROLE=assist ;;
+  A1) DOG_TOPIC="$TEAM_A_1"; TEAMMATE_TOPIC="$TEAM_A_2"; DEFAULT_ROLE=attack ;;
+  A2) DOG_TOPIC="$TEAM_A_2"; TEAMMATE_TOPIC="$TEAM_A_1"; DEFAULT_ROLE=assist ;;
   *) usage; exit 2 ;;
+esac
+# 显式角色固定分工；不指定时保留 T11 原有 attack/assist 自动换位。
+AUTO_ROLE_SWITCH=true
+if [[ -n "${TEAM_ROLE:-}" ]]; then AUTO_ROLE_SWITCH=false; fi
+TEAM_ROLE="${TEAM_ROLE:-$DEFAULT_ROLE}"
+case "$TEAM_ROLE" in
+  attack|assist|defense) ;;
+  *) echo "TEAM_ROLE 只能是 attack、assist 或 defense" >&2; exit 2 ;;
 esac
 case "$GOAL" in goal_right|goal_left) ;; *) usage; exit 2 ;; esac
 case "$ENABLE_MOTION" in true|false) ;; *) echo "ENABLE_MOTION 只能是 true 或 false" >&2; exit 2 ;; esac
@@ -77,12 +86,12 @@ if [[ -z "$DOG_NAME" && "$ENABLE_MOTION" == true ]]; then
   DOG_NAME="${NAMES[0]}"
 fi
 DOG_NAME="${DOG_NAME#/}"; DOG_NAME="${DOG_NAME%/}"
-echo "T11 | $ROLE=$TEAM_ROLE | dog=$DOG_TOPIC | teammate=$TEAMMATE_TOPIC"
+echo "T11 | $ROLE=$TEAM_ROLE | dog=$DOG_TOPIC | teammate=$TEAMMATE_TOPIC | 自动换位=$AUTO_ROLE_SWITCH"
 echo "对手=$OPPONENT_TOPIC,$OPPONENT2_TOPIC | 进攻=$GOAL | 速度=0.45 m/s | 运动=$ENABLE_MOTION | 接口=$DOG_NAME"
 echo "权重：$ATTACK_MODEL + $ASSIST_MODEL；队友预测=regression_velocity"
 ARGS=(
   -p control_mode:=rl -p rl_policy:=shared_2v2
-  -p "team_role:=$TEAM_ROLE" -p rl_auto_role_switch:=true
+  -p "team_role:=$TEAM_ROLE" -p "rl_auto_role_switch:=$AUTO_ROLE_SWITCH"
   -p "rl_attack_model_path:=$ATTACK_MODEL" -p "rl_assist_model_path:=$ASSIST_MODEL"
   -p rl_teammate_prediction_model:=regression_velocity
   -p rl_speed_limit:=0.45 -p rl_speed_gain:=1.0

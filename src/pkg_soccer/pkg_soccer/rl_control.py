@@ -12,6 +12,7 @@ import numpy as np
 
 from .control import Controller, Pose, wrap_angle
 from .measurement import Track
+from .blocking_defense import BlockingDefense
 
 
 class Actor:
@@ -97,10 +98,11 @@ class RLController(Controller):
         self.policy = policy
         self.duel = policy != 'stage2'
         self.team2v2 = policy in ('shared_2v2', 'shared_2v2_large')
-        if self.team2v2 and team_role not in ('attack', 'assist'):
-            raise ValueError('2v2 team_role 必须为 attack 或 assist')
+        if self.team2v2 and team_role not in ('attack', 'assist', 'defense'):
+            raise ValueError('2v2 team_role 必须为 attack、assist 或 defense')
         self.team_role = team_role if self.team2v2 else policy
-        self.auto_role_switch = bool(auto_role_switch)
+        self.auto_role_switch = bool(auto_role_switch) and team_role != 'defense'
+        self.blocking_defense = BlockingDefense() if self.team2v2 and team_role == 'defense' else None
         if not math.isfinite(speed_limit) or not 0 < speed_limit <= 1.5:
             raise ValueError('rl_speed_limit 必须在 (0, 1.5] m/s（协议 vel_des 上限 1.5）')
         # 策略的动作缩放来自权重（shared_2v2 是 0.45/0.20/0.70）。想要更高的
@@ -449,13 +451,16 @@ class RLController(Controller):
             self.confirmed = 3
         if self.started_at is None:
             self.started_at = now
-        action = self.actor(self.observation(now))
         # Training accumulates estimated contact from the previous observation.
         self.distance = math.hypot(b.x-d.x, b.y-d.y)
         self.contact_seen |= self.distance < .43
-        velocity = action*self.effective_scale
-        mode, reason = 'RL', 'PPO {} ({}) 策略控制'.format(
-            self.policy, self.team_role if self.team2v2 else self.policy)
+        if self.blocking_defense is not None:
+            velocity, reason = self.blocking_defense.command(self)
+            mode = 'DEFENSE_BLOCK'
+        else:
+            velocity = self.actor(self.observation(now))*self.effective_scale
+            mode, reason = 'RL', 'PPO {} ({}) 策略控制'.format(
+                self.policy, self.team_role if self.team2v2 else self.policy)
         if self.attack_planner:
             override = self.attack_planner.command(self, now)
             if override is not None:

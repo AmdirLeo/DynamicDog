@@ -60,7 +60,7 @@ class MatchProfileTest(unittest.TestCase):
             c._predict_missing(t + 1.1)
             self.assertIsNone(c.teammate)
 
-    def launch(self, arguments, motion='true', name='robot_test', topics=None):
+    def launch(self, arguments, motion='true', name='robot_test', topics=None, team_role=None):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             (root / 'install').mkdir()
@@ -73,13 +73,15 @@ class MatchProfileTest(unittest.TestCase):
                 'else:\n print("CAPTURED="+json.dumps(sys.argv[1:]))\n')
             executable.chmod(0o755)
             env = os.environ.copy()
-            for key in ('DOG_NAME', 'TEAM_A_1', 'TEAM_A_2', 'ATTACK_GOAL', 'COLCON_TRACE'):
+            for key in ('DOG_NAME', 'TEAM_A_1', 'TEAM_A_2', 'ATTACK_GOAL', 'COLCON_TRACE', 'TEAM_ROLE'):
                 env.pop(key, None)
             env.update(A_WS=str(root), PATH=str(root) + os.pathsep + env['PATH'],
                        PYTHONPATH=str(ROOT), ENABLE_MOTION=motion,
                        RL_MODEL_PATH='/obsolete/model.npz')
             if name is not None:
                 env['DOG_NAME'] = name
+            if team_role is not None:
+                env['TEAM_ROLE'] = team_role
             if topics is not None:
                 env['MOCK_MOTION_TOPICS'] = topics
             return subprocess.run(['bash', str(ROOT / 'start_match.sh')] + arguments,
@@ -110,6 +112,15 @@ class MatchProfileTest(unittest.TestCase):
                               str(PACKAGE / ('policy_2v2_' + model_role + '_actor.npz')), args)
             self.assertFalse(any(value.endswith(':=') for value in args))
             self.assertNotIn('rl_model_path:=/obsolete/model.npz', args)
+
+    def test_fixed_defense_and_attack_roles(self):
+        argv = ['A2', '/vrpn/rival_one/pose', '/vrpn/rival_two/pose']
+        for role in ('defense', 'attack', 'assist'):
+            args = self.arguments(self.launch(argv, team_role=role))
+            self.assertIn('team_role:=' + role, args)
+            self.assertIn('rl_auto_role_switch:=false', args)
+        self.assertIn('rl_auto_role_switch:=true', self.arguments(self.launch(argv)))
+        self.assertEqual(self.launch(argv, team_role='invalid').returncode, 2)
 
     def test_motion_namespace_must_be_unique_and_dry_run_can_omit_it(self):
         argv = ['A1', '/vrpn/rival_one/pose', '/vrpn/rival_two/pose']
