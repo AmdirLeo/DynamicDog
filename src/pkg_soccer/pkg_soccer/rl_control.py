@@ -454,9 +454,6 @@ class RLController(Controller):
                 return self.ZERO
         d, b, c = self.dog, self.ball, self.cfg
         if not self.continuous_play:
-            if not self.inside_field(d.x, d.y):
-                self.stop('狗已超出设定场地')
-                return self.ZERO
             if not self.inside_field(b.x, b.y):
                 self.pause_play(now, '球已出界，等待裁判就近发球')
                 return self.ZERO
@@ -531,10 +528,6 @@ class RLController(Controller):
         wx, wy = co*velocity[0]-si*velocity[1], si*velocity[0]+co*velocity[1]
         if not self.continuous_play and not self.tracking_degraded:
             # Include observed momentum when checking the next half second.
-            for vx, vy in ((wx, wy), self.tracks['dog'].velocity[:2]):
-                if not self.inside_field(d.x+float(vx)*.5, d.y+float(vy)*.5):
-                    self.stop('RL 预计运动将越过场地边界')
-                    return self.ZERO
         if self.deadzone_active:
             self.state = 'DEADZONE_MOVE'
             self.reason = ('球在死区，继续低速运动；等待裁判将球放回发球点，'
